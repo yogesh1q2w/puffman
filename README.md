@@ -1,1 +1,2 @@
 # puffman
+Parallel Huffman Coding 
