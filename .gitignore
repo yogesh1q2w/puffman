@@ -1,0 +1,9 @@
+.vscode/
+compress
+compressed_output.bin
+decompress
+decompressed_output
+testFile.txt
+test.txt
+compressed_testFile.bin
+.vs/
