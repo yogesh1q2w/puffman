@@ -5,7 +5,7 @@
 #include <string.h>
 
 #ifndef KERNEL_CU
-extern __constant__ unsigned char const_code[256][255];
+extern __constant__ unsigned char const_code[256*255];
 extern __constant__ unsigned char const_codeSize[256];
 #endif
 
@@ -25,12 +25,13 @@ __global__ void encode(unsigned int bitCompressedFileSize,
 __global__ void skss_compress_with_shared(unsigned int lastBlockIndex,
                                           unsigned char *dfileContent,
                                           unsigned int *dbitOffsets,
-                                          codedict *copy_d_dictionary,
-                                          unsigned int *d_compressedFile);
+                                          unsigned int *d_compressedFile,
+                                          unsigned char maxCodeSize);
 
 __global__ void skss_compress(unsigned int lastBlockIndex,
                               unsigned char *dfileContent,
                               unsigned int *dbitOffsets,
-                              unsigned int *d_compressedFile);
+                              unsigned int *d_compressedFile,
+                              unsigned char maxCodeSize);
 
-__global__ void printDict();
+__global__ void printDict(codedict &dict);

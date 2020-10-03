@@ -121,9 +121,10 @@ void HuffmanTree::buildTreeFromFrequencies(unsigned long long int *frequency) {
 }
 
 void HuffmanTree::getCodes(TreeNode *node, unsigned char *code,
-                           unsigned char len, codedict *dictionary) {
+                           unsigned char len, codedict *&dictionary) {
   if ((node->left == nullptr) && (node->right == nullptr)) {
     dictionary->codeSize[node->token] = len;
+    memcpy(&dictionary->code[dictionary->maxCodeSize * node->token], code, len);
     dictionary->addCode(node->token, len, code);
     return;
   }
@@ -139,11 +140,26 @@ void HuffmanTree::getCodes(TreeNode *node, unsigned char *code,
   }
 }
 
+unsigned char HuffmanTree::_heightOfTree(TreeNode *node) {
+  if (node == nullptr)
+    return 0;
+  unsigned char lHeight = _heightOfTree(node->left);
+  unsigned char rHeight = _heightOfTree(node->right);
+  return 1 + max(lHeight, rHeight);
+}
+
+unsigned char HuffmanTree::heightOfTree() { return _heightOfTree(root) - 1; }
+
 void HuffmanTree::HuffmanCodes(unsigned long long int *freq,
-                               codedict *dictionary) {
+                               codedict *&dictionary) {
   buildTreeFromFrequencies(freq);
+  unsigned char maxCodeSize = heightOfTree();
+  cout << "height of tree is " << int(maxCodeSize) << endl;
   unsigned char code[255];
+  dictionary = new codedict(0, maxCodeSize);
+  cout << "Object created" << endl;
   getCodes(root, code, 0, dictionary);
+  cout << "Codes written" << endl;
 }
 
 void HuffmanTree::constructTree(TreeNode *node, unsigned char *bitsRepTree,
@@ -176,73 +192,45 @@ void HuffmanTree::writeTree(ofstream &fptr) {
   fptr.write((char *)finalTree, writeTreeSize);
 }
 
-codedict::codedict(unsigned char onDeviceBit) {
-  onDevice = onDeviceBit;
+codedict::codedict(unsigned char _onDevice, unsigned char _maxCodeSize) {
+  onDevice = _onDevice;
+  maxCodeSize = _maxCodeSize;
   if (onDevice) {
-    cudaMalloc(&code, 256 * sizeof(unsigned char *));
+    cudaMalloc(&code, 256 * maxCodeSize * sizeof(unsigned char));
     cudaError_t error = cudaGetLastError();
     cout << "Error encountered: " << cudaGetErrorString(error) << endl;
     cudaMalloc(&codeSize, 256 * sizeof(unsigned char));
     error = cudaGetLastError();
     cout << "Error encountered: " << cudaGetErrorString(error) << endl;
   } else {
-    code = new unsigned char *[256];
+    code = new unsigned char[256 * maxCodeSize];
     codeSize = new unsigned char[256];
   }
 }
 
 void codedict::addCode(const unsigned char &token, const unsigned char &codeLen,
                        const unsigned char *sCode) {
-  code[token] = new unsigned char[codeLen];
-  memcpy(code[token], sCode, codeLen * sizeof(unsigned char));
+  memcpy(&code[token * maxCodeSize], sCode, codeLen * sizeof(unsigned char));
 }
 
-void codedict::deepCopyHostToDevice(codedict &destination) {
-  for (unsigned short i = 0; i < 256; i++) {
-    if (codeSize[i] > 0) {
-      cout << "HI" << endl;
-      cudaMalloc(&destination.code[i], codeSize[i] * sizeof(unsigned char));
-      cudaError_t error = cudaGetLastError();
-      cout << "Error encountered: " << cudaGetErrorString(error) << endl;
-      cudaMemcpy(destination.code[i], code[i], codeSize[i],
-                 cudaMemcpyHostToDevice);
-      error = cudaGetLastError();
-      cout << "Error encountered: " << cudaGetErrorString(error) << endl;
-    }
-  }
-  cudaMemcpy(destination.codeSize, codeSize, 256, cudaMemcpyHostToDevice);
+void codedict::deepCopyHostToDevice(codedict *&destination) {
+  cudaMemcpy(destination->code, code, 256 * maxCodeSize * sizeof(unsigned char),
+             cudaMemcpyHostToDevice);
   cudaError_t error = cudaGetLastError();
+  cout << "Error encountered: " << cudaGetErrorString(error) << endl;
+  cudaMemcpy(destination->codeSize, codeSize, 256, cudaMemcpyHostToDevice);
+  error = cudaGetLastError();
   cout << "Error encountered: " << cudaGetErrorString(error) << endl;
 }
 
-__device__ void codedict::deepCopyDeviceToDevice(codedict *destination) {
-  for (unsigned short i = 0; i < 256; i++) {
-    if (codeSize[i] > 0)
-      memcpy(destination->code[i], code[i], codeSize[i]);
-  }
-  memcpy(destination->codeSize, codeSize, 256);
-}
-
-unsigned short codedict::getSize() {
-  unsigned short size = 0;
-  for (unsigned short i = 0; i < 256; i++) {
-    size += codeSize[i];
-  }
-  return (size + 256 * (sizeof(unsigned char *) + 1) + 1);
-}
+unsigned short codedict::getSize() { return (256 * (maxCodeSize + 1) + 2); }
 
 codedict::~codedict() {
-  if (this->onDevice) {
-    for (unsigned short i = 0; i < 256; i++) {
-      cudaFree(this->code[i]);
-    }
-    cudaFree(this->code);
-    cudaFree(this->codeSize);
+  if (onDevice) {
+    cudaFree(code);
+    cudaFree(codeSize);
   } else {
-    for (unsigned short i = 0; i < 256; i++) {
-      delete this->code[i];
-    }
-    delete this->code;
-    delete this->codeSize;
+    delete code;
+    delete codeSize;
   }
 }

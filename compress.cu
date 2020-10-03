@@ -17,7 +17,7 @@ using namespace std;
 unsigned int numBlocks, numThreads, totalThreads, readSize,
     fileSize = 0, blockSize = BLOCK_SIZE;
 unsigned char *fileContent, *dfileContent;
-codedict dictionary(0);
+codedict *dictionary;
 unsigned int dictionarySize;
 unsigned char useSharedMemory;
 
@@ -25,8 +25,8 @@ void printDictionary(unsigned long long int *frequency) {
   for (unsigned short i = 0; i < 256; i++) {
     if (frequency[i]) {
       cout << char(i) << "\t|\t" << frequency[i] << "\t|\t";
-      for (unsigned char j = 0; j < dictionary.codeSize[i]; j++)
-        cout << int(dictionary.code[i][j]);
+      for (unsigned char j = 0; j < dictionary->codeSize[i]; j++)
+        cout << int(dictionary->code[i * dictionary->maxCodeSize + j]) << ",";
       cout << endl;
     }
   }
@@ -82,14 +82,11 @@ void getFrequencies(unsigned long long int *frequency, ifstream &inputFile) {
 }
 
 void deepCopyHostToConstant() {
-  for (unsigned short i = 0; i < 256; i++) {
-    if (dictionary.codeSize[i] > 0) {
-      cudaMemcpyToSymbol(const_code, dictionary.code[i], dictionary.codeSize[i],
-                         255 * i * sizeof(unsigned char));
-      printerr();
-    }
-  }
-  cudaMemcpyToSymbol(const_codeSize, dictionary.codeSize, 256);
+  cudaMemcpyToSymbol(const_code, dictionary->code,
+                     dictionary->maxCodeSize * 256);
+  printerr();
+
+  cudaMemcpyToSymbol(const_codeSize, dictionary->codeSize, 256);
   printerr();
 }
 
@@ -100,7 +97,8 @@ void getOffsetArray(unsigned int &lastBlockIndex, unsigned int *bitOffsets,
   unsigned int searchValue = BLOCK_SIZE;
   unsigned int i;
   for (i = 1; i < fileSizeRead; i++) {
-    bitOffsets[i] = bitOffsets[i - 1] + dictionary.codeSize[fileContent[i - 1]];
+    bitOffsets[i] =
+        bitOffsets[i - 1] + dictionary->codeSize[fileContent[i - 1]];
 
     if (bitOffsets[i] > searchValue) {
       bitOffsets[i - 1] = searchValue;
@@ -113,7 +111,7 @@ void getOffsetArray(unsigned int &lastBlockIndex, unsigned int *bitOffsets,
     }
   }
 
-  if (bitOffsets[i - 1] + dictionary.codeSize[fileContent[i - 1]] >
+  if (bitOffsets[i - 1] + dictionary->codeSize[fileContent[i - 1]] >
       searchValue) {
     bitOffsets[i - 1] = searchValue;
     searchValue += BLOCK_SIZE;
@@ -134,18 +132,7 @@ void writeFileContents(ifstream &inputFile, ofstream &outputFile,
   unsigned int *bitOffsets, *dbitOffsets;
   bitOffsets = (unsigned int *)malloc(readSize * sizeof(unsigned int));
   cudaMalloc(&dbitOffsets, readSize * sizeof(unsigned int));
-  codedict *copy_d_dictionary;
-
-  if (useSharedMemory) {
-    copy_d_dictionary = new codedict(1);
-    cout << "Created object" << endl;
-    dictionary.deepCopyHostToDevice(*copy_d_dictionary);
-    printerr();
-    cout << "Deep copy done" << endl;
-  } else {
-    deepCopyHostToConstant();
-    // printDict<<<1, 1>>>();
-  }
+  deepCopyHostToConstant();
 
   while (true) {
     inputFile.read((char *)fileContent + lastBlockSize,
@@ -176,12 +163,14 @@ void writeFileContents(ifstream &inputFile, ofstream &outputFile,
 
     numThreadsAndBlocks(lastBlockIndex);
     if (useSharedMemory) {
-      skss_compress_with_shared<<<numBlocks, numThreads, dictionarySize>>>(
-          lastBlockIndex, dfileContent, dbitOffsets, copy_d_dictionary,
-          d_compressedFile);
+      skss_compress_with_shared<<<numBlocks, numThreads,
+                                  (dictionary->maxCodeSize + 1) * 256>>>(
+          lastBlockIndex, dfileContent, dbitOffsets, d_compressedFile,
+          dictionary->maxCodeSize);
     } else {
       skss_compress<<<numBlocks, numThreads>>>(lastBlockIndex, dfileContent,
-                                               dbitOffsets, d_compressedFile);
+                                               dbitOffsets, d_compressedFile,
+                                               dictionary->maxCodeSize);
     }
 
     cudaMemcpy(compressedFile, d_compressedFile,
@@ -199,14 +188,16 @@ void writeFileContents(ifstream &inputFile, ofstream &outputFile,
         finalBlock[(uint)ceil(BLOCK_SIZE / (8. * sizeof(unsigned int)))];
     unsigned int k = 0;
     for (unsigned int i = 0; i < lastBlockSize; i++) {
-      for (unsigned int j = 0; j < dictionary.codeSize[fileContent[i]]; j++) {
+      for (unsigned int j = 0; j < dictionary->codeSize[fileContent[i]]; j++) {
         unsigned int finalPos = k / (8 * sizeof(unsigned int));
         unsigned int modifyIndex = k % (8 * sizeof(unsigned int));
         modifyIndex = 8 * (modifyIndex / 8) + 7 - (modifyIndex % 8);
         unsigned int mask = 1 << modifyIndex;
         finalBlock[finalPos] =
             (finalBlock[finalPos] & ~mask) |
-            ((dictionary.code[fileContent[i]][j] << modifyIndex) & mask);
+            ((dictionary->code[fileContent[i] * dictionary->maxCodeSize + j]
+              << modifyIndex) &
+             mask);
         k++;
       }
     }
@@ -243,12 +234,12 @@ int main(int argc, char **argv) {
   getFrequencies(frequency, inputFile); // build histogram in GPU
 
   HuffmanTree tree;
-  tree.HuffmanCodes(frequency, &dictionary); // build Huffman tree in Host
+  tree.HuffmanCodes(frequency, dictionary); // build Huffman tree in Host
   int sharedMemoryPerBlock;
   cudaDeviceGetAttribute(&sharedMemoryPerBlock,
                          cudaDevAttrMaxSharedMemoryPerBlock, 0);
   printerr();
-  dictionarySize = dictionary.getSize();
+  dictionarySize = dictionary->getSize();
   cout << "Size of dict. = " << dictionarySize
        << ", Shared memory per block = " << sharedMemoryPerBlock << endl;
   if (sharedMemoryPerBlock > dictionarySize) {
@@ -266,7 +257,7 @@ int main(int argc, char **argv) {
   outputFile.write((char *)&tree.noOfLeaves, sizeof(unsigned int));
   tree.writeTree(outputFile);
   writeFileContents(inputFile, outputFile, fileContent);
-  printDictionary(frequency);
+  // printDictionary(frequency);
   cudaFree(dfileContent);
   outputFile.close();
   inputFile.close();

@@ -16,7 +16,7 @@ clean_decompress:
 clean: clean_compress clean_decompress
 
 test:
-	base64 /dev/urandom | head -c 100000 > testFile.txt
+	base64 /dev/urandom | head -c 1000000000 > testFile.txt
 	./compress testFile.txt
 	./decompress compressed_testFile.bin
 	diff decompressed_output testFile.txt

@@ -15,14 +15,14 @@ struct TreeNode {
 
 class codedict {
 public:
-  unsigned char **code;
+  unsigned char *code;
   unsigned char *codeSize;
   unsigned char onDevice;
-  codedict(unsigned char onDevice = 1);
+  unsigned char maxCodeSize;
+  codedict(unsigned char onDevice, unsigned char maxCodeSize);
   void addCode(const unsigned char &index, const unsigned char &codeLen,
                const unsigned char *sCode);
-  void deepCopyHostToDevice(codedict &destination);
-  __device__ void deepCopyDeviceToDevice(codedict *destination);
+  void deepCopyHostToDevice(codedict *&destination);
   unsigned short getSize();
   ~codedict();
 };
@@ -41,9 +41,10 @@ private:
   void deleteTree(TreeNode *node);
   void buildTreeFromFrequencies(unsigned long long int *frequency);
   void getCodes(TreeNode *node, unsigned char *code, unsigned char len,
-                codedict *dictionary);
+                codedict *&dictionary);
   void constructTree(TreeNode *node, unsigned char *bitsRepTree,
                      unsigned int *pos);
+  unsigned char _heightOfTree(TreeNode *node);
 
 public:
   vector<TreeArrayNode> treeInArray;
@@ -51,7 +52,8 @@ public:
   HuffmanTree();
   void readFromFile(std::ifstream &file);
   ~HuffmanTree();
-  void HuffmanCodes(unsigned long long int *freq, codedict *dictionary);
+  unsigned char heightOfTree();
+  void HuffmanCodes(unsigned long long int *freq, codedict *&dictionary);
   void writeTree(ofstream &fptr);
 };
 
