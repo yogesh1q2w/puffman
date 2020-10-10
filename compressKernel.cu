@@ -83,8 +83,11 @@ __global__ void skss_compress_with_shared(unsigned int lastBlockIndex,
                                           unsigned int *d_compressedFile,
                                           unsigned char maxCodeSize) {
   extern __shared__ unsigned char sh_dictionary[];
-  memcpy(sh_dictionary, const_codeSize, 256);
-  memcpy(&sh_dictionary[256], const_code, maxCodeSize * 256);
+  if(threadIdx.x == 0) {
+    memcpy(sh_dictionary, const_codeSize, 256);
+    memcpy(&sh_dictionary[256], const_code, maxCodeSize * 256);
+  }
+  __syncthreads();
   unsigned int id = blockIdx.x * blockDim.x + threadIdx.x;
   unsigned int index = (id % SEGMENT_SIZE) +
                        (SEGMENT_SIZE * PER_THREAD_PROC * (id / SEGMENT_SIZE));

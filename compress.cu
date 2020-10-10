@@ -1,7 +1,13 @@
-#include <fstream>
 #define COMPRESS_CU
+#include <bits/stdc++.h>
 #include <cuda.h>
+#include <fstream>
 #include <iostream>
+
+#include <thrust/device_vector.h>
+#include <thrust/iterator/constant_iterator.h>
+#include <thrust/reduce.h>
+#include <thrust/sort.h>
 
 #include "compressKernel.h"
 #include "huffman.h"
@@ -15,11 +21,31 @@
 using namespace std;
 
 unsigned int numBlocks, numThreads, totalThreads, readSize,
-    fileSize = 0, blockSize = BLOCK_SIZE;
+    blockSize = BLOCK_SIZE;
 unsigned char *fileContent, *dfileContent;
 codedict *dictionary;
 unsigned int dictionarySize;
 unsigned char useSharedMemory;
+unsigned long long int fileSize = 0;
+
+cudaEvent_t start, stop;
+float milliseconds = 0;
+
+void startClock() {
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
+  milliseconds = 0;
+  cudaEventRecord(start, 0);
+}
+
+void stopClock(const string &message) {
+  cudaDeviceSynchronize();
+  cudaEventRecord(stop, 0);
+  cudaEventSynchronize(stop);
+  cudaEventElapsedTime(&milliseconds, start, stop);
+  if (message[0] != '0')
+    cout << "Time taken for " << message << " = " << milliseconds << endl;
+}
 
 void printDictionary(unsigned long long int *frequency) {
   for (unsigned short i = 0; i < 256; i++) {
@@ -45,7 +71,7 @@ void numThreadsAndBlocks(unsigned int totalIndices) {
   numBlocks = ceil(totalThreads / (float)numThreads);
 }
 
-void getFrequencies(unsigned long long int *frequency, ifstream &inputFile) {
+void getFrequencies(unsigned long long int *frequency, FILE *inputFile) {
 
   unsigned long long int *dfrequency;
   unsigned int fileSizeRead;
@@ -56,8 +82,9 @@ void getFrequencies(unsigned long long int *frequency, ifstream &inputFile) {
   printerr();
 
   while (true) {
-    inputFile.read((char *)fileContent, readSize);
-    fileSizeRead = inputFile.gcount();
+    fileSizeRead =
+        fread(fileContent, sizeof(unsigned char), readSize, inputFile);
+
     if (fileSizeRead == 0)
       break;
 
@@ -77,8 +104,7 @@ void getFrequencies(unsigned long long int *frequency, ifstream &inputFile) {
   printerr();
   cudaFree(dfrequency);
   printerr();
-  inputFile.clear();
-  inputFile.seekg(0);
+  rewind(inputFile);
 }
 
 void deepCopyHostToConstant() {
@@ -121,7 +147,7 @@ void getOffsetArray(unsigned int &lastBlockIndex, unsigned int *bitOffsets,
   encodedFileSize = searchValue - BLOCK_SIZE;
 }
 
-void writeFileContents(ifstream &inputFile, ofstream &outputFile,
+void writeFileContents(FILE *inputFile, FILE *outputFile,
                        unsigned char *fileContent) {
 
   unsigned int lastBlockSize = 0;
@@ -134,16 +160,23 @@ void writeFileContents(ifstream &inputFile, ofstream &outputFile,
   cudaMalloc(&dbitOffsets, readSize * sizeof(unsigned int));
   deepCopyHostToConstant();
 
+  float offsetTime = 0;
+  float kernelTime = 0;
   while (true) {
-    inputFile.read((char *)fileContent + lastBlockSize,
-                   readSize - lastBlockSize);
-    unsigned int fileSizeRead = inputFile.gcount();
-    if ((!inputFile) && (fileSizeRead == 0))
+    unsigned int fileSizeRead =
+        fread(fileContent + lastBlockSize, sizeof(unsigned char),
+              readSize - lastBlockSize, inputFile);
+
+    if (fileSizeRead == 0) {
       break;
+    }
 
     fileSizeRead += lastBlockSize;
 
+    startClock();
     getOffsetArray(lastBlockIndex, bitOffsets, fileSizeRead, encodedFileSize);
+    stopClock("0");
+    offsetTime += milliseconds;
 
     lastBlockSize = fileSizeRead - lastBlockIndex;
 
@@ -161,6 +194,7 @@ void writeFileContents(ifstream &inputFile, ofstream &outputFile,
 
     cudaMalloc(&d_compressedFile, writeSize * sizeof(unsigned int));
 
+    startClock();
     numThreadsAndBlocks(lastBlockIndex);
     if (useSharedMemory) {
       skss_compress_with_shared<<<numBlocks, numThreads,
@@ -172,10 +206,13 @@ void writeFileContents(ifstream &inputFile, ofstream &outputFile,
                                                dbitOffsets, d_compressedFile,
                                                dictionary->maxCodeSize);
     }
+    stopClock("0");
+    kernelTime += milliseconds;
 
     cudaMemcpy(compressedFile, d_compressedFile,
                writeSize * sizeof(unsigned int), cudaMemcpyDeviceToHost);
-    outputFile.write((char *)compressedFile, writeSize * sizeof(unsigned int));
+    fwrite(compressedFile, sizeof(unsigned int), writeSize, outputFile);
+
     cudaFree(d_compressedFile);
     free(compressedFile);
 
@@ -201,20 +238,23 @@ void writeFileContents(ifstream &inputFile, ofstream &outputFile,
         k++;
       }
     }
-    outputFile.write((char *)finalBlock, ceil(k / 8.));
+    fwrite(&finalBlock, sizeof(unsigned int), ceil(k / 8.), outputFile);
   }
+  cout << "Total offset calculation time = " << offsetTime << endl;
+  cout << "Total kernel time = " << kernelTime << endl;
 
   cudaFree(dbitOffsets);
   free(bitOffsets);
 }
 
 int main(int argc, char **argv) {
+  FILE *inputFile, *outputFile;
   if (argc != 2) {
     cout << "Running format is ./compress <file name>" << endl;
     return 0;
   }
 
-  ifstream inputFile(argv[1], ios::in | ios::binary);
+  inputFile = fopen(argv[1], "rb");
 
   if (!inputFile) {
     cout << "Please give a valid file to open." << endl;
@@ -226,15 +266,21 @@ int main(int argc, char **argv) {
   printerr();
 
   readSize = 0.01 * memoryFree;
+  // readSize = 98304;       //No. of MPs * Threads per MP * PER_THREAD_PROC * 2
+  cout << readSize << endl;
   unsigned long long int frequency[256];
 
   cudaMalloc(&dfileContent, readSize * sizeof(unsigned char));
   fileContent = (unsigned char *)malloc(readSize);
 
+  startClock();
   getFrequencies(frequency, inputFile); // build histogram in GPU
+  stopClock("Histogramming");
 
   HuffmanTree tree;
+  startClock();
   tree.HuffmanCodes(frequency, dictionary); // build Huffman tree in Host
+  stopClock("Codebook generation");
   int sharedMemoryPerBlock;
   cudaDeviceGetAttribute(&sharedMemoryPerBlock,
                          cudaDevAttrMaxSharedMemoryPerBlock, 0);
@@ -247,19 +293,21 @@ int main(int argc, char **argv) {
   } else {
     useSharedMemory = 0;
   }
-  // useSharedMemory = 0;
   cout << "Shared memory using bit is " << int(useSharedMemory) << endl;
 
-  ofstream outputFile("compressed_testFile.bin", ios::out | ios::binary);
+  outputFile = fopen("compressed_output.bin", "wb");
 
-  outputFile.write((char *)&fileSize, sizeof(long long int));
-  outputFile.write((char *)&blockSize, sizeof(unsigned int));
-  outputFile.write((char *)&tree.noOfLeaves, sizeof(unsigned int));
+  startClock();
+  fwrite(&fileSize, sizeof(unsigned long long int), 1, outputFile);
+  fwrite(&blockSize, sizeof(unsigned int), 1, outputFile);
+  fwrite(&tree.noOfLeaves, sizeof(unsigned int), 1, outputFile);
+
   tree.writeTree(outputFile);
+  stopClock("Write tree and Metadata");
   writeFileContents(inputFile, outputFile, fileContent);
   // printDictionary(frequency);
   cudaFree(dfileContent);
-  outputFile.close();
-  inputFile.close();
+  fclose(outputFile);
+  fclose(inputFile);
   return 0;
 }

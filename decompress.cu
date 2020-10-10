@@ -118,12 +118,11 @@ int main(int argc, char *argv[]) {
   unsigned int blockSize;
   file.read((char *)&sizeOfFile, sizeof(ull));
   file.read((char *)&blockSize, sizeof(unsigned int));
-  cout << "Filesize= " << sizeOfFile << ", Blocksize = " << blockSize << endl;
   blockSize /= 8;
+  cout << sizeOfFile << "," << blockSize << endl;
 
   HuffmanTree tree;
   tree.readFromFile(file);
-  cout << "Tree read from file" << endl;
   ofstream outputFile("decompressed_output", ios::out | ios::binary);
 
   readContentFromFile(file, outputFile, tree, blockSize, sizeOfFile);

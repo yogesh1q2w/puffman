@@ -43,7 +43,7 @@ private:
   void getCodes(TreeNode *node, unsigned char *code, unsigned char len,
                 codedict *&dictionary);
   void constructTree(TreeNode *node, unsigned char *bitsRepTree,
-                     unsigned int *pos);
+                     unsigned int &pos);
   unsigned char _heightOfTree(TreeNode *node);
 
 public:
@@ -54,7 +54,7 @@ public:
   ~HuffmanTree();
   unsigned char heightOfTree();
   void HuffmanCodes(unsigned long long int *freq, codedict *&dictionary);
-  void writeTree(ofstream &fptr);
+  void writeTree(FILE *fptr);
 };
 
 #endif
