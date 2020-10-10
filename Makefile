@@ -2,10 +2,10 @@ all: compress decompress
 	@echo "Done"
 
 compress: clean_compress
-	nvcc -rdc=true -arch=sm_30 -o compress huffman.cu compressKernel.cu compress.cu
+	nvcc -rdc=true -arch=sm_30 -O3 -o compress huffman.cu compressKernel.cu compress.cu
 
 decompress: clean_decompress
-	nvcc -rdc=true -arch=sm_30 -o decompress huffman.cu decompressKernel.cu decompress.cu
+	nvcc -rdc=true -arch=sm_30 -O3 -o decompress huffman.cu decompressKernel.cu decompress.cu
 
 clean_compress:
 	rm -f compress
@@ -16,7 +16,7 @@ clean_decompress:
 clean: clean_compress clean_decompress
 
 test:
-	base64 /dev/urandom | head -c 300000000 > testFile.txt
+	base64 /dev/urandom | head -c 1000000 > testFile.txt
 	./compress testFile.txt
 	./decompress compressed_testFile.bin
 	diff decompressed_output testFile.txt
