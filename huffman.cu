@@ -1,6 +1,7 @@
 #include "huffman.h"
 
 #include <assert.h>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <math.h>
@@ -103,7 +104,7 @@ void HuffmanTree::buildTreeFromFrequencies(unsigned long long int *frequency) {
   typedef pair<ull, TreeNode *> pullt;
   priority_queue<pullt, vector<pullt>, greater<pullt>> minHeap;
   noOfLeaves = 0;
-  for (unsigned int i = 0; i < 256; i++) {
+  for (unsigned short i = 0; i < 256; i++) {
     if (frequency[i] > 0) {
       TreeNode *node = new TreeNode(i);
       minHeap.push(make_pair(frequency[i], node));
@@ -154,42 +155,42 @@ void HuffmanTree::HuffmanCodes(unsigned long long int *freq,
                                codedict *&dictionary) {
   buildTreeFromFrequencies(freq);
   unsigned char maxCodeSize = heightOfTree();
-  cout << "height of tree is " << int(maxCodeSize) << endl;
   unsigned char code[255];
   dictionary = new codedict(0, maxCodeSize);
-  cout << "Object created" << endl;
   getCodes(root, code, 0, dictionary);
-  cout << "Codes written" << endl;
 }
 
 void HuffmanTree::constructTree(TreeNode *node, unsigned char *bitsRepTree,
-                                unsigned int *pos) {
+                                unsigned int &pos) {
+  unsigned int bitRepPos = pos / 8;
+  unsigned int modifyIndex = 7 - pos % 8;
   if ((node->left == nullptr) && (node->right == nullptr)) {
-    bitsRepTree[(*pos)++] = 1;
-    for (unsigned char i = 0; i < 8; i++)
-      bitsRepTree[(*pos)++] = (node->token >> (7 - i)) & 1;
+    bitsRepTree[bitRepPos] = bitsRepTree[bitRepPos] | (1 << modifyIndex);
+    ++pos;
+    for (unsigned char i = 0; i < 8; i++) {
+      bitRepPos = pos / 8;
+      modifyIndex = 7 - (pos % 8);
+      unsigned char mask = (1 << modifyIndex);
+      bitsRepTree[bitRepPos] =
+          (bitsRepTree[bitRepPos] & ~mask) |
+          ((((node->token >> (7 - i)) & 1) << modifyIndex) & mask);
+      ++pos;
+    }
   } else {
-    bitsRepTree[(*pos)++] = 0;
+    bitsRepTree[bitRepPos] = bitsRepTree[bitRepPos] & ~(1 << modifyIndex);
+    ++pos;
     constructTree(node->left, bitsRepTree, pos);
     constructTree(node->right, bitsRepTree, pos);
   }
 }
 
-void HuffmanTree::writeTree(ofstream &fptr) {
-  unsigned char bitsRepTree[10 * noOfLeaves - 1];
+void HuffmanTree::writeTree(FILE *fptr) {
+
+  unsigned int writeTreeSize = ceil((10 * noOfLeaves - 1) / 8.);
+  unsigned char bitsRepTree[writeTreeSize];
   unsigned int pos = 0;
-  constructTree(root, bitsRepTree, &pos);
-  unsigned int writeTreeSize = ceil(pos / 8.);
-  unsigned char finalTree[writeTreeSize];
-  for (unsigned int i = 0; i < writeTreeSize; i++) {
-    for (unsigned int j = 0; j < 8; j++) {
-      if (bitsRepTree[i * 8 + j])
-        finalTree[i] = (finalTree[i] << 1) | 1;
-      else
-        finalTree[i] = finalTree[i] << 1;
-    }
-  }
-  fptr.write((char *)finalTree, writeTreeSize);
+  constructTree(root, bitsRepTree, pos);
+  fwrite(bitsRepTree, sizeof(unsigned char), ceil(pos/8.), fptr);
 }
 
 codedict::codedict(unsigned char _onDevice, unsigned char _maxCodeSize) {
