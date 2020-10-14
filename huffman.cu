@@ -1,8 +1,8 @@
+#include "constants.h"
 #include "huffman.h"
 
 #include <assert.h>
 #include <cstring>
-#include <fstream>
 #include <iostream>
 #include <math.h>
 #include <queue>
@@ -100,8 +100,8 @@ void HuffmanTree::readFromFile(ifstream &file) {
   createTreeFromFile(huffmanTreeInBytes, sizeOfHuffman, offset, index);
 }
 
-void HuffmanTree::buildTreeFromFrequencies(unsigned long long int *frequency) {
-  typedef pair<ull, TreeNode *> pullt;
+void HuffmanTree::buildTreeFromFrequencies(unsigned int *frequency) {
+  typedef pair<uint, TreeNode *> pullt;
   priority_queue<pullt, vector<pullt>, greater<pullt>> minHeap;
   noOfLeaves = 0;
   for (unsigned short i = 0; i < 256; i++) {
@@ -115,7 +115,7 @@ void HuffmanTree::buildTreeFromFrequencies(unsigned long long int *frequency) {
     pullt pair1 = minHeapPop(minHeap);
     pullt pair2 = minHeapPop(minHeap);
     TreeNode *node = new TreeNode(0, pair1.second, pair2.second);
-    ull newNodeFrequency = pair1.first + pair2.first;
+    uint newNodeFrequency = pair1.first + pair2.first;
     minHeap.push(make_pair(newNodeFrequency, node));
   }
   root = minHeap.top().second;
@@ -125,7 +125,6 @@ void HuffmanTree::getCodes(TreeNode *node, unsigned char *code,
                            unsigned char len, codedict *&dictionary) {
   if ((node->left == nullptr) && (node->right == nullptr)) {
     dictionary->codeSize[node->token] = len;
-    memcpy(&dictionary->code[dictionary->maxCodeSize * node->token], code, len);
     dictionary->addCode(node->token, len, code);
     return;
   }
@@ -151,12 +150,11 @@ unsigned char HuffmanTree::_heightOfTree(TreeNode *node) {
 
 unsigned char HuffmanTree::heightOfTree() { return _heightOfTree(root) - 1; }
 
-void HuffmanTree::HuffmanCodes(unsigned long long int *freq,
-                               codedict *&dictionary) {
+void HuffmanTree::HuffmanCodes(unsigned int *freq, codedict *&dictionary) {
   buildTreeFromFrequencies(freq);
   unsigned char maxCodeSize = heightOfTree();
   unsigned char code[255];
-  dictionary = new codedict(0, maxCodeSize);
+  dictionary = new codedict(maxCodeSize);
   getCodes(root, code, 0, dictionary);
 }
 
@@ -190,48 +188,24 @@ void HuffmanTree::writeTree(FILE *fptr) {
   unsigned char bitsRepTree[writeTreeSize];
   unsigned int pos = 0;
   constructTree(root, bitsRepTree, pos);
-  fwrite(bitsRepTree, sizeof(unsigned char), ceil(pos/8.), fptr);
+  fwrite(bitsRepTree, sizeof(unsigned char), ceil(pos / 8.), fptr);
 }
 
-codedict::codedict(unsigned char _onDevice, unsigned char _maxCodeSize) {
-  onDevice = _onDevice;
+codedict::codedict(unsigned char _maxCodeSize) {
   maxCodeSize = _maxCodeSize;
-  if (onDevice) {
-    cudaMalloc(&code, 256 * maxCodeSize * sizeof(unsigned char));
-    cudaError_t error = cudaGetLastError();
-    cout << "Error encountered: " << cudaGetErrorString(error) << endl;
-    cudaMalloc(&codeSize, 256 * sizeof(unsigned char));
-    error = cudaGetLastError();
-    cout << "Error encountered: " << cudaGetErrorString(error) << endl;
-  } else {
-    code = new unsigned char[256 * maxCodeSize];
-    codeSize = new unsigned char[256];
-  }
+  code = new unsigned char[256 * maxCodeSize];
+  codeSize = new unsigned char[256];
 }
 
 void codedict::addCode(const unsigned char &token, const unsigned char &codeLen,
                        const unsigned char *sCode) {
-  memcpy(&code[token * maxCodeSize], sCode, codeLen * sizeof(unsigned char));
+  for (unsigned short i = 0; i < codeLen; i++)
+    code[i * 256 + token] = sCode[i];
 }
 
-void codedict::deepCopyHostToDevice(codedict *&destination) {
-  cudaMemcpy(destination->code, code, 256 * maxCodeSize * sizeof(unsigned char),
-             cudaMemcpyHostToDevice);
-  cudaError_t error = cudaGetLastError();
-  cout << "Error encountered: " << cudaGetErrorString(error) << endl;
-  cudaMemcpy(destination->codeSize, codeSize, 256, cudaMemcpyHostToDevice);
-  error = cudaGetLastError();
-  cout << "Error encountered: " << cudaGetErrorString(error) << endl;
-}
-
-unsigned short codedict::getSize() { return (256 * (maxCodeSize + 1) + 2); }
+unsigned short codedict::getSize() { return (256 * (maxCodeSize + 1) + 1); }
 
 codedict::~codedict() {
-  if (onDevice) {
-    cudaFree(code);
-    cudaFree(codeSize);
-  } else {
-    delete code;
-    delete codeSize;
-  }
+  delete code;
+  delete codeSize;
 }
