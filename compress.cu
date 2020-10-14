@@ -1,250 +1,168 @@
 #define COMPRESS_CU
 #include <bits/stdc++.h>
 #include <cuda.h>
-#include <fstream>
-#include <iostream>
-
-#include <thrust/device_vector.h>
-#include <thrust/iterator/constant_iterator.h>
-#include <thrust/reduce.h>
-#include <thrust/sort.h>
+#include <unistd.h>
 
 #include "compressKernel.h"
+#include "constants.h"
 #include "huffman.h"
-#include <assert.h>
-
-#define MAX_THREADS 1024
-#define BLOCK_SIZE 256
-#define PER_THREAD_PROC 8
-#define SEGMENT_SIZE 256
 
 using namespace std;
 
-unsigned int numBlocks, numThreads, totalThreads, readSize,
-    blockSize = BLOCK_SIZE;
-unsigned char *fileContent, *dfileContent;
+uint blockSize = BLOCK_SIZE;
+uint *fileContent, *dfileContent;
 codedict *dictionary;
-unsigned int dictionarySize;
+uint dictionarySize;
 unsigned char useSharedMemory;
-unsigned long long int fileSize = 0;
+unsigned long long int fileSize;
+uint intFileSize;
 
-cudaEvent_t start, stop;
-float milliseconds = 0;
-
-void startClock() {
-  cudaEventCreate(&start);
-  cudaEventCreate(&stop);
-  milliseconds = 0;
-  cudaEventRecord(start, 0);
-}
-
-void stopClock(const string &message) {
-  cudaDeviceSynchronize();
-  cudaEventRecord(stop, 0);
-  cudaEventSynchronize(stop);
-  cudaEventElapsedTime(&milliseconds, start, stop);
-  if (message[0] != '0')
-    cout << "Time taken for " << message << " = " << milliseconds << endl;
-}
-
-void printDictionary(unsigned long long int *frequency) {
+void printDictionary(uint *frequency) {
   for (unsigned short i = 0; i < 256; i++) {
     if (frequency[i]) {
       cout << char(i) << "\t|\t" << frequency[i] << "\t|\t";
       for (unsigned char j = 0; j < dictionary->codeSize[i]; j++)
-        cout << int(dictionary->code[i * dictionary->maxCodeSize + j]) << ",";
+        cout << int(dictionary->code[j * 256 + i]) << ",";
       cout << endl;
     }
   }
 }
 
-void printerr() {
-  cudaError_t error = cudaGetLastError();
-  if (error != cudaSuccess)
-    cout << "Error encountered: " << cudaGetErrorString(error) << endl;
-}
+void getFrequencies(uint *frequency) {
 
-void numThreadsAndBlocks(unsigned int totalIndices) {
-  totalThreads = ceil(totalIndices / (float)(SEGMENT_SIZE * PER_THREAD_PROC)) *
-                 SEGMENT_SIZE;
-  numThreads = min(MAX_THREADS, totalThreads);
-  numBlocks = ceil(totalThreads / (float)numThreads);
-}
-
-void getFrequencies(unsigned long long int *frequency, FILE *inputFile) {
-
-  unsigned long long int *dfrequency;
-  unsigned int fileSizeRead;
-
-  cudaMalloc(&dfrequency, 256 * sizeof(unsigned long long int));
-  printerr();
-  cudaMemset(dfrequency, 0, 256 * sizeof(unsigned long long int));
-  printerr();
-
-  while (true) {
-    fileSizeRead =
-        fread(fileContent, sizeof(unsigned char), readSize, inputFile);
-
-    if (fileSizeRead == 0)
-      break;
-
-    fileSize += fileSizeRead;
-
-    cudaMemcpy(dfileContent, fileContent, fileSizeRead, cudaMemcpyHostToDevice);
-    printerr();
-
-    numThreadsAndBlocks(fileSizeRead);
-    updatefrequency<<<numBlocks, numThreads>>>(fileSizeRead, dfileContent,
-                                               dfrequency);
-    printerr();
-  }
-
-  cudaMemcpy(frequency, dfrequency, sizeof(unsigned long long int) * 256,
-             cudaMemcpyDeviceToHost);
-  printerr();
+  uint *dfrequency;
+  cudaMalloc((void **)&dfrequency, 256 * sizeof(uint));
+  CUERROR
+  cudaMemset(dfrequency, 0, 256 * sizeof(uint));
+  CUERROR
+  uint *d_PartialHistograms;
+  cudaMalloc((void **)&d_PartialHistograms,
+             sizeof(uint) * HIST_BLOCK * HIST_SIZE);
+  CUERROR
+  TIMER_START(hist)
+  cu_histgram<<<HIST_BLOCK, HIST_THREADS>>>(d_PartialHistograms, dfileContent,
+                                            intFileSize, fileSize);
+  mergeHistogram<<<HIST_BLOCK, HIST_SIZE>>>(dfrequency, d_PartialHistograms);
+  cudaMemcpy(frequency, dfrequency, 256 * sizeof(uint), cudaMemcpyDeviceToHost);
+  TIMER_STOP(hist)
+  cudaFree(d_PartialHistograms);
+  CUERROR
   cudaFree(dfrequency);
-  printerr();
-  rewind(inputFile);
+  CUERROR
 }
 
 void deepCopyHostToConstant() {
   cudaMemcpyToSymbol(const_code, dictionary->code,
                      dictionary->maxCodeSize * 256);
-  printerr();
+  CUERROR
 
   cudaMemcpyToSymbol(const_codeSize, dictionary->codeSize, 256);
-  printerr();
+  CUERROR
 }
 
-void getOffsetArray(unsigned int &lastBlockIndex, unsigned int *bitOffsets,
-                    unsigned int fileSizeRead, unsigned int &encodedFileSize) {
-  lastBlockIndex = 0;
+inline unsigned char getcharAt(uint pos) {
+  return (fileContent[pos >> 2] >> ((pos & 3U) << 3)) & 0xFFU;
+}
+
+void getOffsetArray(uint *bitOffsets, uint &encodedFileSize) {
   bitOffsets[0] = 0;
-  unsigned int searchValue = BLOCK_SIZE;
-  unsigned int i;
-  for (i = 1; i < fileSizeRead; i++) {
-    bitOffsets[i] =
-        bitOffsets[i - 1] + dictionary->codeSize[fileContent[i - 1]];
+  uint searchValue = BLOCK_SIZE;
+  uint i;
+  for (i = 1; i < fileSize; i++) {
+    bitOffsets[i] = bitOffsets[i - 1] + dictionary->codeSize[getcharAt(i - 1)];
 
     if (bitOffsets[i] > searchValue) {
       bitOffsets[i - 1] = searchValue;
       searchValue += BLOCK_SIZE;
       i--;
-      lastBlockIndex = i;
     } else if (bitOffsets[i] == searchValue) {
       searchValue += BLOCK_SIZE;
-      lastBlockIndex = i;
     }
   }
 
-  if (bitOffsets[i - 1] + dictionary->codeSize[fileContent[i - 1]] >
+  if (bitOffsets[i - 1] + dictionary->codeSize[getcharAt(i - 1)] >
       searchValue) {
     bitOffsets[i - 1] = searchValue;
     searchValue += BLOCK_SIZE;
-    lastBlockIndex = i - 1;
   }
-
-  encodedFileSize = searchValue - BLOCK_SIZE;
+  encodedFileSize =
+      bitOffsets[fileSize - 1] + dictionary->codeSize[getcharAt(fileSize - 1)];
 }
 
-void writeFileContents(FILE *inputFile, FILE *outputFile,
-                       unsigned char *fileContent) {
+void writeFileContents(FILE *outputFile) {
 
-  unsigned int lastBlockSize = 0;
-  unsigned int lastBlockIndex = 0;
-  unsigned int encodedFileSize;
-
-  unsigned int *compressedFile, *d_compressedFile;
-  unsigned int *bitOffsets, *dbitOffsets;
-  bitOffsets = (unsigned int *)malloc(readSize * sizeof(unsigned int));
-  cudaMalloc(&dbitOffsets, readSize * sizeof(unsigned int));
+  uint *compressedFile, *d_compressedFile;
+  uint *bitOffsets, *dbitOffsets;
+  cudaMallocHost(&bitOffsets, fileSize * sizeof(uint));
+  CUERROR
+  cudaMalloc((void **)&dbitOffsets, fileSize * sizeof(uint));
+  CUERROR
   deepCopyHostToConstant();
 
-  float offsetTime = 0;
-  float kernelTime = 0;
-  while (true) {
-    unsigned int fileSizeRead =
-        fread(fileContent + lastBlockSize, sizeof(unsigned char),
-              readSize - lastBlockSize, inputFile);
+  uint encodedFileSize;
+  TIMER_START(offset)
+  getOffsetArray(bitOffsets, encodedFileSize);
+  TIMER_STOP(offset)
 
-    if (fileSizeRead == 0) {
-      break;
-    }
+  cudaMemcpy(dbitOffsets, bitOffsets, fileSize * sizeof(uint),
+             cudaMemcpyHostToDevice);
+  CUERROR
 
-    fileSizeRead += lastBlockSize;
+  uint writeSize = (encodedFileSize + 31) >> 5;
 
-    startClock();
-    getOffsetArray(lastBlockIndex, bitOffsets, fileSizeRead, encodedFileSize);
-    stopClock("0");
-    offsetTime += milliseconds;
+  cudaMallocHost(&compressedFile, writeSize * sizeof(uint));
+  CUERROR
+  cudaMalloc((void **)&d_compressedFile, writeSize * sizeof(uint));
+  CUERROR
 
-    lastBlockSize = fileSizeRead - lastBlockIndex;
-
-    if (encodedFileSize == 0)
-      continue;
-
-    cudaMemcpy(dfileContent, fileContent, fileSizeRead * sizeof(unsigned char),
-               cudaMemcpyHostToDevice);
-    cudaMemcpy(dbitOffsets, bitOffsets, fileSizeRead * sizeof(unsigned int),
-               cudaMemcpyHostToDevice);
-
-    unsigned int writeSize = encodedFileSize / (8 * sizeof(unsigned int));
-
-    compressedFile = (unsigned int *)malloc(writeSize * sizeof(unsigned int));
-
-    cudaMalloc(&d_compressedFile, writeSize * sizeof(unsigned int));
-
-    startClock();
-    numThreadsAndBlocks(lastBlockIndex);
-    if (useSharedMemory) {
-      skss_compress_with_shared<<<numBlocks, numThreads,
-                                  (dictionary->maxCodeSize + 1) * 256>>>(
-          lastBlockIndex, dfileContent, dbitOffsets, d_compressedFile,
-          dictionary->maxCodeSize);
-    } else {
-      skss_compress<<<numBlocks, numThreads>>>(lastBlockIndex, dfileContent,
-                                               dbitOffsets, d_compressedFile,
-                                               dictionary->maxCodeSize);
-    }
-    stopClock("0");
-    kernelTime += milliseconds;
-
-    cudaMemcpy(compressedFile, d_compressedFile,
-               writeSize * sizeof(unsigned int), cudaMemcpyDeviceToHost);
-    fwrite(compressedFile, sizeof(unsigned int), writeSize, outputFile);
-
-    cudaFree(d_compressedFile);
-    free(compressedFile);
-
-    memcpy(fileContent, fileContent + lastBlockIndex,
-           lastBlockSize * sizeof(unsigned char));
+  if (useSharedMemory) {
+    TIMER_START(kernel)
+    skss_compress_with_shared<<<BLOCK_NUM, 256,
+                                (dictionary->maxCodeSize + 1) * 256>>>(
+        fileSize, dfileContent, dbitOffsets, d_compressedFile,
+        dictionary->maxCodeSize);
+    TIMER_STOP(kernel)
+  } else {
+    TIMER_START(kernel)
+    skss_compress<<<BLOCK_NUM, 256>>>(fileSize, dfileContent, dbitOffsets,
+                                      d_compressedFile,
+                                      dictionary->maxCodeSize);
+    TIMER_STOP(kernel)
   }
 
-  if (lastBlockSize > 0) {
-    unsigned int
-        finalBlock[(uint)ceil(BLOCK_SIZE / (8. * sizeof(unsigned int)))];
-    unsigned int k = 0;
-    for (unsigned int i = 0; i < lastBlockSize; i++) {
-      for (unsigned int j = 0; j < dictionary->codeSize[fileContent[i]]; j++) {
-        unsigned int finalPos = k / (8 * sizeof(unsigned int));
-        unsigned int modifyIndex = k % (8 * sizeof(unsigned int));
-        modifyIndex = 8 * (modifyIndex / 8) + 7 - (modifyIndex % 8);
-        unsigned int mask = 1 << modifyIndex;
-        finalBlock[finalPos] =
-            (finalBlock[finalPos] & ~mask) |
-            ((dictionary->code[fileContent[i] * dictionary->maxCodeSize + j]
-              << modifyIndex) &
-             mask);
-        k++;
-      }
-    }
-    fwrite(&finalBlock, sizeof(unsigned int), ceil(k / 8.), outputFile);
-  }
-  cout << "Total offset calculation time = " << offsetTime << endl;
-  cout << "Total kernel time = " << kernelTime << endl;
-
+  cudaMemcpy(compressedFile, d_compressedFile, writeSize * sizeof(uint),
+             cudaMemcpyDeviceToHost);
+  CUERROR
+  fwrite(compressedFile, sizeof(uint), writeSize, outputFile);
+  fdatasync(outputFile->_fileno);
+  cudaFree(d_compressedFile);
+  CUERROR
+  cudaFreeHost(compressedFile);
+  CUERROR
   cudaFree(dbitOffsets);
-  free(bitOffsets);
+  CUERROR
+  cudaFreeHost(bitOffsets);
+  CUERROR
+}
+
+void readFile(uint *&fileContent, uint *&dfileContent, FILE *inputFile) {
+  fseek(inputFile, 0L, SEEK_END);
+  fileSize = ftell(inputFile);
+  fseek(inputFile, 0L, SEEK_SET);
+  intFileSize = (fileSize + 3) >> 2;
+  cudaMallocHost(&fileContent, sizeof(uint) * intFileSize);
+  CUERROR
+  cudaMalloc((void **)&dfileContent, sizeof(uint) * intFileSize);
+  CUERROR
+  uint sizeRead =
+      fread(fileContent, sizeof(unsigned char), fileSize, inputFile);
+  if (sizeRead != fileSize) {
+    cout << "Error in reading the file. Aborting..." << endl;
+    exit(0);
+  }
+  cudaMemcpy(dfileContent, fileContent, sizeof(uint) * intFileSize,
+             cudaMemcpyHostToDevice);
+  CUERROR
 }
 
 int main(int argc, char **argv) {
@@ -261,53 +179,46 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  size_t memoryFree, memoryTotal;
-  cudaMemGetInfo(&memoryFree, &memoryTotal);
-  printerr();
+  uint frequency[256];
 
-  readSize = 0.01 * memoryFree;
-  // readSize = 98304;       //No. of MPs * Threads per MP * PER_THREAD_PROC * 2
-  cout << readSize << endl;
-  unsigned long long int frequency[256];
+  TIMER_START(readFile)
+  readFile(fileContent, dfileContent, inputFile);
+  TIMER_STOP(readFile)
+  fsync(inputFile->_fileno);
 
-  cudaMalloc(&dfileContent, readSize * sizeof(unsigned char));
-  fileContent = (unsigned char *)malloc(readSize);
-
-  startClock();
-  getFrequencies(frequency, inputFile); // build histogram in GPU
-  stopClock("Histogramming");
+  getFrequencies(frequency); // build histogram in GPU
 
   HuffmanTree tree;
-  startClock();
+  TIMER_START(tree)
   tree.HuffmanCodes(frequency, dictionary); // build Huffman tree in Host
-  stopClock("Codebook generation");
-  int sharedMemoryPerBlock;
-  cudaDeviceGetAttribute(&sharedMemoryPerBlock,
+  TIMER_STOP(tree)
+  uint sharedMemoryPerBlock;
+  cudaDeviceGetAttribute((int *)&sharedMemoryPerBlock,
                          cudaDevAttrMaxSharedMemoryPerBlock, 0);
-  printerr();
+
   dictionarySize = dictionary->getSize();
-  cout << "Size of dict. = " << dictionarySize
-       << ", Shared memory per block = " << sharedMemoryPerBlock << endl;
   if (sharedMemoryPerBlock > dictionarySize) {
     useSharedMemory = 1;
   } else {
     useSharedMemory = 0;
   }
+
   cout << "Shared memory using bit is " << int(useSharedMemory) << endl;
 
   outputFile = fopen("compressed_output.bin", "wb");
 
-  startClock();
+  TIMER_START(meta)
   fwrite(&fileSize, sizeof(unsigned long long int), 1, outputFile);
-  fwrite(&blockSize, sizeof(unsigned int), 1, outputFile);
-  fwrite(&tree.noOfLeaves, sizeof(unsigned int), 1, outputFile);
-
+  fwrite(&blockSize, sizeof(uint), 1, outputFile);
+  fwrite(&tree.noOfLeaves, sizeof(uint), 1, outputFile);
   tree.writeTree(outputFile);
-  stopClock("Write tree and Metadata");
-  writeFileContents(inputFile, outputFile, fileContent);
-  // printDictionary(frequency);
+  TIMER_STOP(meta)
+  writeFileContents(outputFile);
+  cudaFreeHost(fileContent);
+  CUERROR
   cudaFree(dfileContent);
-  fclose(outputFile);
+  CUERROR
   fclose(inputFile);
+  fclose(outputFile);
   return 0;
 }
