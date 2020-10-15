@@ -10,7 +10,7 @@ extern __constant__ unsigned char const_codeSize[256];
 #endif
 
 __global__ void cu_histgram(unsigned int *d_PartialHistograms,
-                            unsigned int *d_Data, unsigned int dataCount,s
+                            unsigned int *d_Data, unsigned int dataCount,
                             unsigned int byteCount);
 
 __global__ void mergeHistogram(unsigned int *d_Histogram,

@@ -1,6 +1,5 @@
 #include "decompressKernel.h"
 #include <assert.h>
-typedef unsigned long long int ull;
 
 __constant__ TreeArrayNode deviceTree[512];
 __constant__ int rootIndex;

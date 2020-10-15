@@ -14,7 +14,7 @@ uint *fileContent, *dfileContent;
 codedict *dictionary;
 uint dictionarySize;
 unsigned char useSharedMemory;
-unsigned long long int fileSize;
+unsigned long long int fileSize; 
 uint intFileSize;
 
 void printDictionary(uint *frequency) {

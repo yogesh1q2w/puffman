@@ -1,7 +1,3 @@
-#define MAX_THREADS 1024
-#define MAX_FILE_NAME_SIZE 100
-#define MAX_THREADS_TO_USE 65536
-
 #include <chrono>
 #include <fstream>
 #include <iostream>
@@ -14,7 +10,6 @@
 
 using namespace std;
 
-typedef unsigned long long int ull;
 
 inline unsigned findNoOfThreadBlocks(unsigned totalNoOfThreads) {
   unsigned noOfThreadBlocks = ceil((double)totalNoOfThreads / MAX_THREADS);
@@ -65,7 +60,7 @@ unsigned char *calculateOffsetAndWriteOutput(unsigned char *input,
   return output;
 }
 
-void findSizeOfInputFile(ifstream& inputFile) {
+ull findSizeOfInputFile(ifstream& inputFile) {
   streampos currentPositionInFile = inputFile.tellg();
   inputFile.seekg(0, inputFile.end);
   ull maxSizeOfInputFile = inputFile.tellg();
