@@ -1,5 +1,6 @@
 #include "decompressKernel.h"
 #include <assert.h>
+typedef unsigned long long int ull;
 
 __constant__ TreeArrayNode deviceTree[512];
 __constant__ int rootIndex;
@@ -29,26 +30,26 @@ __device__ unsigned parseTree(unsigned char *byteArray, unsigned size,
 }
 
 __global__ void convertBitsToBytes(unsigned char *input,
-                                   unsigned char *inputInBytes, unsigned size,
+                                   unsigned char *inputInBytes, ull size,
                                    unsigned blockSize) {
-  unsigned id = threadIdx.x + blockIdx.x * blockDim.x;
+  ull id = threadIdx.x + blockIdx.x * blockDim.x;
   if (id * blockSize < size) {
-    unsigned sizeInBlock = min(blockSize, size - id * blockSize),
-             offset = id * blockSize;
-    for (unsigned i = offset; i < offset + sizeInBlock; i++)
+    unsigned sizeInBlock = min((ull) blockSize, size - id * blockSize);
+    ull offset = id * blockSize;
+    for (ull i = offset; i < offset + sizeInBlock; i++)
       for (unsigned j = 0; j < 8; j++)
         inputInBytes[i * 8 + j] = (input[i] >> (7 - j)) & 1;
   }
 }
 
-__global__ void calculateNoOfTokensInBlock(unsigned char *input, unsigned size,
+__global__ void calculateNoOfTokensInBlock(unsigned char *input, ull size,
                                            unsigned blockSize,
                                            unsigned *outputSizes) {
-  unsigned id = threadIdx.x + blockIdx.x * blockDim.x;
+  ull id = threadIdx.x + blockIdx.x * blockDim.x;
   if (id * blockSize < size) {
-    unsigned sizeInBlock = min(blockSize, size - id * blockSize), index = 0,
+    unsigned sizeInBlock = min((ull) blockSize, size - id * blockSize), index = 0,
              noOfTokensInBlock = 0, noOfBytesParsed, noOfBytesLeftInBlock;
-    const unsigned offset = id * blockSize;
+    const ull offset = id * blockSize;
     unsigned char token;
     while (true) {
       noOfBytesLeftInBlock = sizeInBlock - index;
@@ -64,15 +65,15 @@ __global__ void calculateNoOfTokensInBlock(unsigned char *input, unsigned size,
 }
 
 __global__ void writeOutput(unsigned char *input, unsigned char *output,
-                            unsigned size, unsigned blockSize,
+                            ull size, unsigned blockSize,
                             unsigned *offsets) {
-  unsigned id = threadIdx.x + blockIdx.x * blockDim.x;
+  ull id = threadIdx.x + blockIdx.x * blockDim.x;
   if (id * blockSize < size) {
-    unsigned sizeInBlock = min(blockSize, size - id * blockSize),
+    unsigned sizeInBlock = min((ull)blockSize, size - id * blockSize),
              inputIndex = 0, noOfBytesParsed, outputIndex = offsets[id],
              noOfBytesLeftInBlock;
     unsigned char token;
-    const unsigned inputOffset = id * blockSize;
+    const ull inputOffset = id * blockSize;
     while (true) {
       noOfBytesLeftInBlock = sizeInBlock - inputIndex;
       noOfBytesParsed = parseTree(&input[inputIndex + inputOffset],
