@@ -37,3 +37,7 @@ static double sum_of_time = 0;
 #define HIST_SIZE 256
 #define S_HIST_SIZE (WARP_COUNT * HIST_SIZE)
 #define HIST_BLOCK 240
+
+#define MAX_FILE_NAME_SIZE 100
+#define MAX_THREADS_TO_USE 65536
+typedef unsigned long long int ull;

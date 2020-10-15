@@ -1,7 +1,3 @@
-#define MAX_THREADS 1024
-#define MAX_FILE_NAME_SIZE 100
-#define MAX_THREADS_TO_USE 65536
-
 #include <chrono>
 #include <fstream>
 #include <iostream>
@@ -14,7 +10,6 @@
 
 using namespace std;
 
-typedef unsigned long long int ull;
 
 inline unsigned findNoOfThreadBlocks(unsigned totalNoOfThreads) {
   unsigned noOfThreadBlocks = ceil((double)totalNoOfThreads / MAX_THREADS);
@@ -22,15 +17,13 @@ inline unsigned findNoOfThreadBlocks(unsigned totalNoOfThreads) {
 }
 
 unsigned char *calculateOffsetAndWriteOutput(unsigned char *input,
-                                             unsigned size, unsigned blockSize,
-                                             unsigned &outputSize) {
+                                             ull size, unsigned blockSize) {
   unsigned *offsets;
-  unsigned char *dOutput, *output, *dInput, *dInputInBytes;
-  cudaMalloc(&dInput, size * sizeof(unsigned char));
-  cudaMemcpy(dInput, input, size * sizeof(unsigned char),
-             cudaMemcpyHostToDevice);
-
-  cudaMalloc(&dInputInBytes, size * 8 * sizeof(unsigned char));
+  unsigned char *dOutput, *dInput, *dInputInBytes;
+  cudaMalloc(&dInput, size);
+  cudaMemcpy(dInput, input, size, cudaMemcpyHostToDevice);
+  cudaFreeHost(input);
+  cudaMalloc(&dInputInBytes, size * 8);
   unsigned noOfThreads = ceil(((double)size) / blockSize);
   unsigned noOfThreadBlocks = findNoOfThreadBlocks(noOfThreads);
 
@@ -48,9 +41,10 @@ unsigned char *calculateOffsetAndWriteOutput(unsigned char *input,
                          offsets);
   cudaDeviceSynchronize();
 
+  ull outputSize;
   cudaMemcpy(&outputSize, offsets + noOfThreads, sizeof(unsigned),
              cudaMemcpyDeviceToHost);
-  cudaMalloc(&dOutput, outputSize * sizeof(unsigned char));
+  cudaMalloc(&dOutput, outputSize);
   writeOutput<<<noOfThreadBlocks, MAX_THREADS>>>(
       dInputInBytes, dOutput, size * 8, blockSize * 8, offsets);
   cudaDeviceSynchronize();
@@ -58,30 +52,25 @@ unsigned char *calculateOffsetAndWriteOutput(unsigned char *input,
   cudaFree(offsets);
   cudaFree(dInputInBytes);
 
-  output = new unsigned char[outputSize * sizeof(unsigned char)];
-  cudaMemcpy(output, dOutput, outputSize * sizeof(unsigned char),
+  unsigned char* output;
+  cudaMallocHost(&output, outputSize);
+  cudaMemcpy(output, dOutput, outputSize,
              cudaMemcpyDeviceToHost);
-  // printf("--->%s\n",output);
   cudaFree(dOutput);
   return output;
 }
 
+ull findSizeOfInputFile(ifstream& inputFile) {
+  streampos currentPositionInFile = inputFile.tellg();
+  inputFile.seekg(0, inputFile.end);
+  ull maxSizeOfInputFile = inputFile.tellg();
+  inputFile.seekg(currentPositionInFile);
+  return maxSizeOfInputFile;
+}
+
 void readContentFromFile(ifstream &inputFile, ofstream &outputFile,
                          const HuffmanTree &tree, unsigned blockSize,
-                         ull sizeOfInputFile) {
-  size_t memoryFree, memoryTotal;
-  cudaError_t error;
-
-  error = cudaMemGetInfo(&memoryFree, &memoryTotal);
-  if (error != cudaSuccess) {
-    printf("Error encountered: %s\n", cudaGetErrorString(error));
-    return;
-  }
-
-  const unsigned chunkSize = MAX_THREADS_TO_USE * blockSize;
-  unsigned char input[chunkSize], *output;
-  unsigned outputSize;
-  ull sizeWrittenToFile = 0;
+                         ull sizeOfOriginalFile) {
 
   unsigned size = tree.treeInArray.size();
   cudaMemcpyToSymbol(deviceTree, tree.treeInArray.data(),
@@ -89,18 +78,16 @@ void readContentFromFile(ifstream &inputFile, ofstream &outputFile,
   size--;
   cudaMemcpyToSymbol(rootIndex, &size, sizeof(int));
 
-  while (inputFile) {
-    inputFile.read((char *)input, chunkSize);
-    unsigned noOfBytesRead = inputFile.gcount();
+  ull maxSizeOfInputFile = findSizeOfInputFile(inputFile);
+  unsigned char *input, *output;
+  cudaMallocHost(&input, maxSizeOfInputFile);
 
-    output = calculateOffsetAndWriteOutput(input, noOfBytesRead, blockSize,
-                                           outputSize);
+  inputFile.read((char *)input, maxSizeOfInputFile);
+  ull noOfBytesRead = inputFile.gcount();
+  output = calculateOffsetAndWriteOutput(input, noOfBytesRead, blockSize);
 
-    ull sizeToWrite = min((ull)outputSize, sizeOfInputFile - sizeWrittenToFile);
-    outputFile.write((char *)output, sizeToWrite);
-    sizeWrittenToFile += sizeToWrite;
-    delete[] output;
-  }
+  outputFile.write((char *)output, sizeOfOriginalFile);
+  cudaFreeHost(output);
 }
 
 int main(int argc, char *argv[]) {
