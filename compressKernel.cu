@@ -6,6 +6,8 @@
 __constant__ unsigned char const_code[256 * 255];
 __constant__ unsigned char const_codeSize[256];
 
+//---------------------------------HISTOGRAM-------------------------------------
+
 inline __device__ void addByte(uint *s_WarpHist, unsigned char data) {
   atomicAdd(s_WarpHist + data, 1);
 }
@@ -76,6 +78,8 @@ __global__ void mergeHistogram(uint *d_Histogram, uint *d_PartialHistograms) {
   uint val = d_PartialHistograms[blockIdx.x * HIST_SIZE + threadIdx.x];
   atomicAdd(d_Histogram + threadIdx.x, val);
 }
+
+//-----------------------------------------------------------------------------------------------
 
 __device__ inline unsigned char getcharAt(uint *dfileContent, uint pos) {
   return (dfileContent[pos >> 2] >> ((pos & 3U) << 3)) & 0xFFU;

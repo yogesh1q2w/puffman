@@ -7,3 +7,6 @@ testFile.txt
 test.txt
 compressed_testFile.bin
 .vs/
+.idea/
+a.out
+simple.txt

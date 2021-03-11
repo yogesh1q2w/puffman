@@ -9,20 +9,13 @@ using namespace std;
 struct TreeNode {
   unsigned char token;
   TreeNode *left, *right;
-  TreeNode(unsigned char token, TreeNode *left, TreeNode *right);
+  TreeNode(unsigned char token, TreeNode *left=nullptr, TreeNode *right=nullptr);
 };
 
 class codedict {
 public:
-  unsigned char *code;
-  unsigned char *codeSize;
-  unsigned char maxCodeSize;
-  codedict(unsigned char maxCodeSize);
-  void addCode(const unsigned char &index, const unsigned char &codeLen,
-               const unsigned char *sCode);
-  void deepCopyHostToDevice(codedict *&destination);
-  unsigned short getSize();
-  ~codedict();
+  unsigned int code[256];
+  unsigned char codeSize[256];
 };
 
 struct TreeArrayNode {
@@ -37,12 +30,14 @@ private:
   int createTreeFromFile(unsigned char *array, unsigned size, unsigned &offset,
                          int &index);
   void deleteTree(TreeNode *node);
-  void buildTreeFromFrequencies(unsigned int *frequency);
-  void getCodes(TreeNode *node, unsigned char *code, unsigned char len,
-                codedict *&dictionary);
   void constructTree(TreeNode *node, unsigned char *bitsRepTree,
                      unsigned int &pos);
   unsigned char _heightOfTree(TreeNode *node);
+
+
+  void buildTreeFromFrequencies(unsigned int *frequency);
+  void getCodes(TreeNode *node, uint &code, unsigned char len,
+                codedict &dictionary);
 
 public:
   vector<TreeArrayNode> treeInArray;
@@ -51,8 +46,11 @@ public:
   void readFromFile(std::ifstream &file);
   ~HuffmanTree();
   unsigned char heightOfTree();
-  void HuffmanCodes(unsigned int *freq, codedict *&dictionary);
   void writeTree(FILE *fptr);
+
+
+  void HuffmanCodes(unsigned int *freq, codedict &dictionary);
+
 };
 
 #endif

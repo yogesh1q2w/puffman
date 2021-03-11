@@ -11,18 +11,18 @@ using namespace std;
 
 uint blockSize = BLOCK_SIZE;
 uint *fileContent, *dfileContent;
-codedict *dictionary;
+codedict dictionary;
 uint dictionarySize;
 unsigned char useSharedMemory;
-unsigned long long int fileSize; 
+unsigned long long int fileSize;
 uint intFileSize;
 
 void printDictionary(uint *frequency) {
   for (unsigned short i = 0; i < 256; i++) {
     if (frequency[i]) {
       cout << char(i) << "\t|\t" << frequency[i] << "\t|\t";
-      for (unsigned char j = 0; j < dictionary->codeSize[i]; j++)
-        cout << int(dictionary->code[j * 256 + i]) << ",";
+      for (unsigned char j = 0; j < dictionary.codeSize[i]; j++)
+        cout << int(1 & (dictionary.code[i] >> (31 - j)));
       cout << endl;
     }
   }
@@ -51,15 +51,6 @@ void getFrequencies(uint *frequency) {
   CUERROR
 }
 
-void deepCopyHostToConstant() {
-  cudaMemcpyToSymbol(const_code, dictionary->code,
-                     dictionary->maxCodeSize * 256);
-  CUERROR
-
-  cudaMemcpyToSymbol(const_codeSize, dictionary->codeSize, 256);
-  CUERROR
-}
-
 inline unsigned char getcharAt(uint pos) {
   return (fileContent[pos >> 2] >> ((pos & 3U) << 3)) & 0xFFU;
 }
@@ -69,7 +60,7 @@ void getOffsetArray(uint *bitOffsets, uint &encodedFileSize) {
   uint searchValue = BLOCK_SIZE;
   uint i;
   for (i = 1; i < fileSize; i++) {
-    bitOffsets[i] = bitOffsets[i - 1] + dictionary->codeSize[getcharAt(i - 1)];
+    bitOffsets[i] = bitOffsets[i - 1] + dictionary.codeSize[getcharAt(i - 1)];
 
     if (bitOffsets[i] > searchValue) {
       bitOffsets[i - 1] = searchValue;
@@ -80,13 +71,11 @@ void getOffsetArray(uint *bitOffsets, uint &encodedFileSize) {
     }
   }
 
-  if (bitOffsets[i - 1] + dictionary->codeSize[getcharAt(i - 1)] >
-      searchValue) {
+  if (bitOffsets[i - 1] + dictionary.codeSize[getcharAt(i - 1)] > searchValue) {
     bitOffsets[i - 1] = searchValue;
-    searchValue += BLOCK_SIZE;
   }
   encodedFileSize =
-      bitOffsets[fileSize - 1] + dictionary->codeSize[getcharAt(fileSize - 1)];
+      bitOffsets[fileSize - 1] + dictionary.codeSize[getcharAt(fileSize - 1)];
 }
 
 void writeFileContents(FILE *outputFile) {
@@ -97,7 +86,6 @@ void writeFileContents(FILE *outputFile) {
   CUERROR
   cudaMalloc((void **)&dbitOffsets, fileSize * sizeof(uint));
   CUERROR
-  deepCopyHostToConstant();
 
   uint encodedFileSize;
   TIMER_START(offset)
@@ -115,20 +103,10 @@ void writeFileContents(FILE *outputFile) {
   cudaMalloc((void **)&d_compressedFile, writeSize * sizeof(uint));
   CUERROR
 
-  if (useSharedMemory) {
-    TIMER_START(kernel)
-    skss_compress_with_shared<<<BLOCK_NUM, 256,
-                                (dictionary->maxCodeSize + 1) * 256>>>(
-        fileSize, dfileContent, dbitOffsets, d_compressedFile,
-        dictionary->maxCodeSize);
-    TIMER_STOP(kernel)
-  } else {
-    TIMER_START(kernel)
-    skss_compress<<<BLOCK_NUM, 256>>>(fileSize, dfileContent, dbitOffsets,
-                                      d_compressedFile,
-                                      dictionary->maxCodeSize);
-    TIMER_STOP(kernel)
-  }
+  TIMER_START(kernel)
+  skss_compress_with_shared<<<BLOCK_NUM, 256, 1280>>>(
+      fileSize, dfileContent, dbitOffsets, d_compressedFile);
+  TIMER_STOP(kernel)
 
   cudaMemcpy(compressedFile, d_compressedFile, writeSize * sizeof(uint),
              cudaMemcpyDeviceToHost);
@@ -156,13 +134,16 @@ void readFile(uint *&fileContent, uint *&dfileContent, FILE *inputFile) {
   CUERROR
   uint sizeRead =
       fread(fileContent, sizeof(unsigned char), fileSize, inputFile);
+  fsync(inputFile->_fileno); // What is this fsync for?
   if (sizeRead != fileSize) {
     cout << "Error in reading the file. Aborting..." << endl;
     exit(0);
   }
+  TIMER_START(HtD1)
   cudaMemcpy(dfileContent, fileContent, sizeof(uint) * intFileSize,
              cudaMemcpyHostToDevice);
   CUERROR
+  TIMER_STOP(HtD1)
 }
 
 int main(int argc, char **argv) {
@@ -184,7 +165,6 @@ int main(int argc, char **argv) {
   TIMER_START(readFile)
   readFile(fileContent, dfileContent, inputFile);
   TIMER_STOP(readFile)
-  fsync(inputFile->_fileno);
 
   getFrequencies(frequency); // build histogram in GPU
 
@@ -192,18 +172,7 @@ int main(int argc, char **argv) {
   TIMER_START(tree)
   tree.HuffmanCodes(frequency, dictionary); // build Huffman tree in Host
   TIMER_STOP(tree)
-  uint sharedMemoryPerBlock;
-  cudaDeviceGetAttribute((int *)&sharedMemoryPerBlock,
-                         cudaDevAttrMaxSharedMemoryPerBlock, 0);
-
-  dictionarySize = dictionary->getSize();
-  if (sharedMemoryPerBlock > dictionarySize) {
-    useSharedMemory = 1;
-  } else {
-    useSharedMemory = 0;
-  }
-
-  cout << "Shared memory using bit is " << int(useSharedMemory) << endl;
+  printDictionary(frequency);
 
   outputFile = fopen("compressed_output.bin", "wb");
 
@@ -214,11 +183,11 @@ int main(int argc, char **argv) {
   tree.writeTree(outputFile);
   TIMER_STOP(meta)
   writeFileContents(outputFile);
-  cudaFreeHost(fileContent);
-  CUERROR
-  cudaFree(dfileContent);
-  CUERROR
-  fclose(inputFile);
+  // cudaFreeHost(fileContent);
+  // CUERROR
+  // cudaFree(dfileContent);
+  // CUERROR
+  // fclose(inputFile);
   fclose(outputFile);
   return 0;
 }

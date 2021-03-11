@@ -36,8 +36,8 @@ unsigned char readByte(unsigned char *byte) {
   return result;
 }
 
-TreeNode::TreeNode(unsigned char token, TreeNode *left = nullptr,
-                   TreeNode *right = nullptr) {
+TreeNode::TreeNode(unsigned char token, TreeNode *left,
+                   TreeNode *right) {
   this->token = token;
   this->left = left;
   this->right = right;
@@ -102,7 +102,7 @@ void HuffmanTree::readFromFile(ifstream &file) {
 
 void HuffmanTree::buildTreeFromFrequencies(unsigned int *frequency) {
   typedef pair<uint, TreeNode *> pullt;
-  priority_queue<pullt, vector<pullt>, greater<pullt>> minHeap;
+  priority_queue<pullt, vector<pullt>, greater<pullt> > minHeap;
   noOfLeaves = 0;
   for (unsigned short i = 0; i < 256; i++) {
     if (frequency[i] > 0) {
@@ -121,40 +121,28 @@ void HuffmanTree::buildTreeFromFrequencies(unsigned int *frequency) {
   root = minHeap.top().second;
 }
 
-void HuffmanTree::getCodes(TreeNode *node, unsigned char *code,
-                           unsigned char len, codedict *&dictionary) {
+void HuffmanTree::getCodes(TreeNode *node, uint &code,
+                           unsigned char len, codedict &dictionary) {
   if ((node->left == nullptr) && (node->right == nullptr)) {
-    dictionary->codeSize[node->token] = len;
-    dictionary->addCode(node->token, len, code);
+    dictionary.codeSize[node->token] = len;
+    dictionary.code[node->token] = code;
     return;
   }
 
   if (node->left != nullptr) {
-    code[len] = 0;
+    code = code & (~(1 << (31-len)));
     getCodes(node->left, code, len + 1, dictionary);
   }
 
   if (node->right != nullptr) {
-    code[len] = 1;
+    code = code | (1 << (31-len));
     getCodes(node->right, code, len + 1, dictionary);
   }
 }
 
-unsigned char HuffmanTree::_heightOfTree(TreeNode *node) {
-  if (node == nullptr)
-    return 0;
-  unsigned char lHeight = _heightOfTree(node->left);
-  unsigned char rHeight = _heightOfTree(node->right);
-  return 1 + max(lHeight, rHeight);
-}
-
-unsigned char HuffmanTree::heightOfTree() { return _heightOfTree(root) - 1; }
-
-void HuffmanTree::HuffmanCodes(unsigned int *freq, codedict *&dictionary) {
+void HuffmanTree::HuffmanCodes(unsigned int *freq, codedict &dictionary) {
   buildTreeFromFrequencies(freq);
-  unsigned char maxCodeSize = heightOfTree();
-  unsigned char code[255];
-  dictionary = new codedict(maxCodeSize);
+  uint code = 0;
   getCodes(root, code, 0, dictionary);
 }
 
@@ -189,23 +177,4 @@ void HuffmanTree::writeTree(FILE *fptr) {
   unsigned int pos = 0;
   constructTree(root, bitsRepTree, pos);
   fwrite(bitsRepTree, sizeof(unsigned char), ceil(pos / 8.), fptr);
-}
-
-codedict::codedict(unsigned char _maxCodeSize) {
-  maxCodeSize = _maxCodeSize;
-  code = new unsigned char[256 * maxCodeSize];
-  codeSize = new unsigned char[256];
-}
-
-void codedict::addCode(const unsigned char &token, const unsigned char &codeLen,
-                       const unsigned char *sCode) {
-  for (unsigned short i = 0; i < codeLen; i++)
-    code[i * 256 + token] = sCode[i];
-}
-
-unsigned short codedict::getSize() { return (256 * (maxCodeSize + 1) + 1); }
-
-codedict::~codedict() {
-  delete code;
-  delete codeSize;
 }
