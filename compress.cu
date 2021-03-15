@@ -66,6 +66,15 @@ inline unsigned char getcharAt(uint pos) {
   return (fileContent[pos >> 2] >> ((pos & 3U) << 3)) & 0xFFU;
 }
 
+// void printOut(uint *out, uint size) {
+//   cout << "The file written was-\n";
+//   for (uint i = 0; i < size; i++) {
+//     for (uint j = 0; j < 32; j++)
+//       cout << int(1 & (out[i] >> (31-j)));
+//   }
+//   cout << "\n-------------------------------------------------------" << endl;
+// }
+
 void getOffsetArray(uint *bitOffsets, uint *boundary_index,
                     uint &encodedFileSize) {
   bitOffsets[0] = 0;
@@ -116,6 +125,11 @@ void writeFileContents(FILE *outputFile) {
              cudaMemcpyHostToDevice);
   CUERROR
 
+  // cout << "Prefix array and Boundary" << endl;
+  // for (uint i = 0; i < fileSize; i++) {
+  //   cout << i << "-->" << bitOffsets[i] << " , " << boundary_index[i] << endl;
+  // }
+
   uint writeSize = (encodedFileSize + 31) >> 5;
 
   cudaMallocHost(&compressedFile, writeSize * sizeof(uint));
@@ -153,6 +167,7 @@ void writeFileContents(FILE *outputFile) {
   fdatasync(outputFile->_fileno);
   cudaFree(d_compressedFile);
   CUERROR
+  // printOut(compressedFile, writeSize);
   cudaFreeHost(compressedFile);
   CUERROR
   cudaFree(dbitOffsets);
@@ -206,7 +221,7 @@ int main(int argc, char **argv) {
   TIMER_START(tree)
   tree.HuffmanCodes(frequency, dictionary); // build Huffman tree in Host
   TIMER_STOP(tree)
-  printDictionary(frequency);
+  // printDictionary(frequency);
 
   outputFile = fopen("compressed_output.bin", "wb");
 

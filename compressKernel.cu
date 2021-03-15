@@ -132,29 +132,32 @@ __global__ void encode(uint fileSize, uint *dfileContent, uint *dbitOffsets,
                   (BLOCK_SIZE * ((uint)ceil(boundary_pos / (1. * BLOCK_SIZE)) -
                                  boundary_pos)));
         code_length =
-            (BLOCK_SIZE *
-             ((uint)ceil(boundary_pos / (1. * BLOCK_SIZE)) - boundary_pos));
+            BLOCK_SIZE * ((uint)ceil(boundary_pos / (1. * BLOCK_SIZE))) -
+            boundary_pos;
+        threadBoundaryIndex[inputPosInThreadTask] = 0;
         inputPosInThreadTask--;
       }
       if (32 - startPosInOutputWord >= code_length) {
         code <<= (32 - startPosInOutputWord - code_length);
         remain_code = 0;
         pendingBitsFromPreviousCode = 0;
+        startPosInOutputWord += code_length;
       } else {
+        // printf("It also reaches here :)\n");
         remain_code = code << (32 - code_length + 32 - startPosInOutputWord);
         pendingBitsFromPreviousCode = (code_length - 32 + startPosInOutputWord);
         code >>= pendingBitsFromPreviousCode;
       }
       outputWord |= code;
       if (pendingBitsFromPreviousCode) {
-        atomicOr(&d_compressedFile[outputPos], outputWord);
+        // printf("writing %u to output\n", outputWord);
+        atomicOr(&d_compressedFile[outputPos++], outputWord);
         outputWord = remain_code;
         startPosInOutputWord = pendingBitsFromPreviousCode;
-        outputPos++;
       }
       inputPosInThreadTask++;
     }
-
+    atomicOr(&d_compressedFile[outputPos++], outputWord);
     if (threadIdx.x == 0) {
       shared_task_idx = atomicAdd(counter, 1);
     }
