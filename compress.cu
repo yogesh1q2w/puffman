@@ -16,6 +16,7 @@ uint dictionarySize;
 unsigned char useSharedMemory;
 unsigned long long int fileSize;
 uint intFileSize;
+uint frequency[256];
 
 void printDictionary(uint *frequency) {
   for (unsigned short i = 0; i < 256; i++) {
@@ -28,7 +29,7 @@ void printDictionary(uint *frequency) {
   }
 }
 
-void getFrequencies(uint *frequency) {
+void getFrequencies() {
 
   uint *dfrequency;
   cudaMalloc((void **)&dfrequency, 256 * sizeof(uint));
@@ -51,11 +52,22 @@ void getFrequencies(uint *frequency) {
   CUERROR
 }
 
+unsigned long long int getMaxOutputFileSize() {
+  unsigned long long int maxOutputFileSize = 0;
+  for (uint i = 0; i < 256; i++) {
+    maxOutputFileSize += frequency[i] * dictionary.codeSize[i];
+  }
+  maxOutputFileSize =
+      ceil(maxOutputFileSize * (blockSize / (blockSize - 32.0)));
+  return maxOutputFileSize;
+}
+
 inline unsigned char getcharAt(uint pos) {
   return (fileContent[pos >> 2] >> ((pos & 3U) << 3)) & 0xFFU;
 }
 
-void getOffsetArray(uint *bitOffsets, uint &encodedFileSize) {
+void getOffsetArray(uint *bitOffsets, uint *boundary_index,
+                    uint &encodedFileSize) {
   bitOffsets[0] = 0;
   uint searchValue = BLOCK_SIZE;
   uint i;
@@ -63,6 +75,7 @@ void getOffsetArray(uint *bitOffsets, uint &encodedFileSize) {
     bitOffsets[i] = bitOffsets[i - 1] + dictionary.codeSize[getcharAt(i - 1)];
 
     if (bitOffsets[i] > searchValue) {
+      boundary_index[i - 1] = bitOffsets[i - 1];
       bitOffsets[i - 1] = searchValue;
       searchValue += BLOCK_SIZE;
       i--;
@@ -72,6 +85,7 @@ void getOffsetArray(uint *bitOffsets, uint &encodedFileSize) {
   }
 
   if (bitOffsets[i - 1] + dictionary.codeSize[getcharAt(i - 1)] > searchValue) {
+    boundary_index[i - 1] = bitOffsets[i - 1];
     bitOffsets[i - 1] = searchValue;
   }
   encodedFileSize =
@@ -82,17 +96,23 @@ void writeFileContents(FILE *outputFile) {
 
   uint *compressedFile, *d_compressedFile;
   uint *bitOffsets, *dbitOffsets;
+  uint *boundary_index, *d_boundary_index;
   cudaMallocHost(&bitOffsets, fileSize * sizeof(uint));
+  cudaMallocHost(&boundary_index, fileSize * sizeof(uint));
+  cudaMemset(boundary_index, 0, fileSize * sizeof(uint));
   CUERROR
   cudaMalloc((void **)&dbitOffsets, fileSize * sizeof(uint));
+  cudaMalloc((void **)&d_boundary_index, fileSize * sizeof(uint));
   CUERROR
 
   uint encodedFileSize;
   TIMER_START(offset)
-  getOffsetArray(bitOffsets, encodedFileSize);
+  getOffsetArray(bitOffsets, boundary_index, encodedFileSize);
   TIMER_STOP(offset)
 
   cudaMemcpy(dbitOffsets, bitOffsets, fileSize * sizeof(uint),
+             cudaMemcpyHostToDevice);
+  cudaMemcpy(d_boundary_index, boundary_index, fileSize * sizeof(uint),
              cudaMemcpyHostToDevice);
   CUERROR
 
@@ -101,13 +121,31 @@ void writeFileContents(FILE *outputFile) {
   cudaMallocHost(&compressedFile, writeSize * sizeof(uint));
   CUERROR
   cudaMalloc((void **)&d_compressedFile, writeSize * sizeof(uint));
+  cudaMemset(d_compressedFile, 0, writeSize * sizeof(uint));
   CUERROR
 
-  TIMER_START(kernel)
-  skss_compress_with_shared<<<BLOCK_NUM, 256, 1280>>>(
-      fileSize, dfileContent, dbitOffsets, d_compressedFile);
-  TIMER_STOP(kernel)
+  uint *d_dictionary_code;
+  unsigned char *d_dictionary_codelens;
+  cudaMalloc(&d_dictionary_code, 256 * sizeof(uint));
+  cudaMalloc(&d_dictionary_codelens, 256 * sizeof(unsigned char));
+  cudaMemcpy(d_dictionary_code, dictionary.code, 256 * sizeof(uint),
+             cudaMemcpyHostToDevice);
+  cudaMemcpy(d_dictionary_codelens, dictionary.codeSize, 256 * sizeof(unsigned char),
+             cudaMemcpyHostToDevice);
+  // print_dict<<<1, 1>>>(d_dictionary_code, d_dictionary_codelens);
 
+  uint *counter;
+  cudaMalloc(&counter, sizeof(uint));
+  cudaMemset(counter, 0, sizeof(uint));
+
+  uint numTasks = ceil(fileSize / (256. * PER_THREAD_PROC));
+
+  TIMER_START(kernel)
+  encode<<<BLOCK_NUM, 256>>>(fileSize, dfileContent, dbitOffsets,
+                             d_boundary_index, d_compressedFile, d_dictionary_code, d_dictionary_codelens,
+                             counter, numTasks);
+  TIMER_STOP(kernel)
+  CUERROR
   cudaMemcpy(compressedFile, d_compressedFile, writeSize * sizeof(uint),
              cudaMemcpyDeviceToHost);
   CUERROR
@@ -118,8 +156,6 @@ void writeFileContents(FILE *outputFile) {
   cudaFreeHost(compressedFile);
   CUERROR
   cudaFree(dbitOffsets);
-  CUERROR
-  cudaFreeHost(bitOffsets);
   CUERROR
 }
 
@@ -160,13 +196,11 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  uint frequency[256];
-
   TIMER_START(readFile)
   readFile(fileContent, dfileContent, inputFile);
   TIMER_STOP(readFile)
 
-  getFrequencies(frequency); // build histogram in GPU
+  getFrequencies(); // build histogram in GPU
 
   HuffmanTree tree;
   TIMER_START(tree)
@@ -183,11 +217,11 @@ int main(int argc, char **argv) {
   tree.writeTree(outputFile);
   TIMER_STOP(meta)
   writeFileContents(outputFile);
-  // cudaFreeHost(fileContent);
-  // CUERROR
-  // cudaFree(dfileContent);
-  // CUERROR
-  // fclose(inputFile);
+  cudaFreeHost(fileContent);
+  CUERROR
+  cudaFree(dfileContent);
+  CUERROR
+  fclose(inputFile);
   fclose(outputFile);
   return 0;
 }

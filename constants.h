@@ -25,11 +25,10 @@ static double sum_of_time = 0;
   sum_of_time += time##id;                                                     \
   printf("%s -> %f\n", #id, time##id);
 
-#define MAX_THREADS 1024
-#define BLOCK_SIZE 256
-#define PER_THREAD_PROC 8
-#define SEGMENT_SIZE 256
-#define BLOCK_NUM 8 * 80
+#define GET_CHAR(value, shift) ((value>>((shift)*8))&0xFF)
+#define BLOCK_SIZE 1024
+#define PER_THREAD_PROC 32
+#define BLOCK_NUM 1
 
 #define HIST_THREADS 192
 #define WARP_SIZE 32

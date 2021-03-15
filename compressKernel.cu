@@ -1,11 +1,8 @@
+#include "huffman.h"
 #include <cstdio>
 #define KERNEL_CU
 #include "compressKernel.h"
 #include "constants.h"
-
-__constant__ unsigned char const_code[256 * 255];
-__constant__ unsigned char const_codeSize[256];
-
 //---------------------------------HISTOGRAM-------------------------------------
 
 inline __device__ void addByte(uint *s_WarpHist, unsigned char data) {
@@ -85,101 +82,95 @@ __device__ inline unsigned char getcharAt(uint *dfileContent, uint pos) {
   return (dfileContent[pos >> 2] >> ((pos & 3U) << 3)) & 0xFFU;
 }
 
-__global__ void skss_compress_with_shared(uint fileSize, uint *dfileContent,
-                                          uint *dbitOffsets,
-                                          uint *d_compressedFile,
-                                          unsigned char maxCodeSize) {
+__global__ void encode(uint fileSize, uint *dfileContent, uint *dbitOffsets,
+                       uint *d_boundary_index, uint *d_compressedFile,
+                       uint *d_dictionary_code,
+                       unsigned char *d_dictionary_codelens, uint *counter,
+                       uint numTasks) {
+  uint task_idx = 0;
+  uint threadInput_idx = 0;
+  uint *threadInput, *threadBoundaryIndex;
+  __shared__ struct codedict sh_dictionary;
+  __shared__ unsigned int shared_task_idx;
 
-  extern __shared__ unsigned char sh_dictionary[];
-  sh_dictionary[threadIdx.x] = const_codeSize[threadIdx.x];
-  for (ushort i = 0; i < maxCodeSize; i++)
-    sh_dictionary[((i + 1) << 8) + threadIdx.x] =
-        const_code[(i << 8) + threadIdx.x];
+  sh_dictionary.code[threadIdx.x] = d_dictionary_code[threadIdx.x];
+  sh_dictionary.codeSize[threadIdx.x] = d_dictionary_codelens[threadIdx.x];
+
+  // if (sh_dictionary.codeSize[threadIdx.x] != 0)
+  //   printf("code_len %c= %d\n", threadIdx.x,
+  //          sh_dictionary.codeSize[threadIdx.x]);
+
+  if (threadIdx.x == 0) {
+    shared_task_idx = atomicAdd(counter, 1);
+  }
   __syncthreads();
 
-  uint id = blockIdx.x * blockDim.x + threadIdx.x;
-  uint stepSize = blockDim.x * gridDim.x;
+  task_idx = shared_task_idx;
+  threadInput_idx = (task_idx * blockDim.x + threadIdx.x) * PER_THREAD_PROC;
 
-  while (id <= fileSize) {
-    if (id < fileSize) {
-      uint start = dbitOffsets[id];
-      uint end = start + sh_dictionary[getcharAt(dfileContent, id)];
-      for (uint j = start; j < end; j++) {
-        uint compressedFilePos = j >> 5;
-        uint modifyIndex = j & 31U;
-        modifyIndex = ((modifyIndex >> 3) << 3) + 7U - (modifyIndex & 7U);
-        uint mask = 1 << modifyIndex;
-        if (sh_dictionary[getcharAt(dfileContent, id) +
-                          ((j - start + 1) << 8)]) {
-          atomicOr(&d_compressedFile[compressedFilePos], mask);
-        } else {
-          atomicAnd(&d_compressedFile[compressedFilePos], ~mask);
-        }
+  while (task_idx < numTasks) {
+    threadInput = dfileContent + (threadInput_idx / 4);
+    threadBoundaryIndex = d_boundary_index + threadInput_idx;
+    uint inputPosInThreadTask = 0;
+    uint outputPos = dbitOffsets[threadInput_idx] / 32;
+    uint startPosInOutputWord = dbitOffsets[threadInput_idx] % 32;
+    uint outputWord = 0;
+    uint input = 0;
+    uint pendingBitsFromPreviousCode;
+    uint remain_code = 0;
+    while (inputPosInThreadTask < PER_THREAD_PROC &&
+           threadInput_idx + inputPosInThreadTask < fileSize) {
+      if ((inputPosInThreadTask & 3) == 0)
+        input = threadInput[inputPosInThreadTask / 4];
+      uint code = sh_dictionary.code[GET_CHAR(input, inputPosInThreadTask & 3)];
+      unsigned char code_length =
+          sh_dictionary.codeSize[GET_CHAR(input, inputPosInThreadTask & 3)];
+      code >>= (32 - code_length);
+      uint boundary_pos = threadBoundaryIndex[inputPosInThreadTask];
+      if (boundary_pos != 0) {
+        code >>= (code_length -
+                  (BLOCK_SIZE * ((uint)ceil(boundary_pos / (1. * BLOCK_SIZE)) -
+                                 boundary_pos)));
+        code_length =
+            (BLOCK_SIZE *
+             ((uint)ceil(boundary_pos / (1. * BLOCK_SIZE)) - boundary_pos));
+        inputPosInThreadTask--;
       }
+      if (32 - startPosInOutputWord >= code_length) {
+        code <<= (32 - startPosInOutputWord - code_length);
+        remain_code = 0;
+        pendingBitsFromPreviousCode = 0;
+      } else {
+        remain_code = code << (32 - code_length + 32 - startPosInOutputWord);
+        pendingBitsFromPreviousCode = (code_length - 32 + startPosInOutputWord);
+        code >>= pendingBitsFromPreviousCode;
+      }
+      outputWord |= code;
+      if (pendingBitsFromPreviousCode) {
+        atomicOr(&d_compressedFile[outputPos], outputWord);
+        outputWord = remain_code;
+        startPosInOutputWord = pendingBitsFromPreviousCode;
+        outputPos++;
+      }
+      inputPosInThreadTask++;
     }
 
-    if (id > 0 &&
-        dbitOffsets[id - 1] + sh_dictionary[getcharAt(dfileContent, id - 1)] !=
-            dbitOffsets[id]) {
-      uint start =
-          dbitOffsets[id - 1] + sh_dictionary[getcharAt(dfileContent, id - 1)];
-      for (uint j = start; j < dbitOffsets[id]; j++) {
-        uint compressedFilePos = j >> 5;
-        uint modifyIndex = j & 31U;
-        modifyIndex = ((modifyIndex >> 3) << 3) + 7U - (modifyIndex & 7U);
-        uint mask = 1 << modifyIndex;
-        if (sh_dictionary[getcharAt(dfileContent, id) +
-                          ((j + 1 - start) << 8)]) {
-          atomicOr(&d_compressedFile[compressedFilePos], mask);
-        } else {
-          atomicAnd(&d_compressedFile[compressedFilePos], ~mask);
-        }
-      }
+    if (threadIdx.x == 0) {
+      shared_task_idx = atomicAdd(counter, 1);
     }
-    id += stepSize;
+    __syncthreads();
+
+    task_idx = shared_task_idx;
+    threadInput_idx = (task_idx * blockDim.x + threadIdx.x) * PER_THREAD_PROC;
   }
 }
 
-__global__ void skss_compress(uint fileSize, uint *dfileContent,
-                              uint *dbitOffsets, uint *d_compressedFile,
-                              unsigned char maxCodeSize) {
-  uint id = blockIdx.x * blockDim.x + threadIdx.x;
-  uint stepSize = blockDim.x * gridDim.x;
-
-  while (id <= fileSize) {
-    if (id < fileSize) {
-      uint start = dbitOffsets[id];
-      uint end = start + const_codeSize[getcharAt(dfileContent, id)];
-      for (uint j = start; j < end; j++) {
-        uint compressedFilePos = j >> 5;
-        uint modifyIndex = j & 31U;
-        modifyIndex = ((modifyIndex >> 3) << 3) + 7U - (modifyIndex & 7U);
-        uint mask = 1 << modifyIndex;
-        if (const_code[getcharAt(dfileContent, id) + ((j - start) << 8)]) {
-          atomicOr(&d_compressedFile[compressedFilePos], mask);
-        } else {
-          atomicAnd(&d_compressedFile[compressedFilePos], ~mask);
-        }
-      }
-    }
-
-    if (id > 0 &&
-        dbitOffsets[id - 1] + const_codeSize[getcharAt(dfileContent, id - 1)] !=
-            dbitOffsets[id]) {
-      uint start =
-          dbitOffsets[id - 1] + const_codeSize[getcharAt(dfileContent, id - 1)];
-      for (uint j = start; j < dbitOffsets[id]; j++) {
-        uint compressedFilePos = j >> 5;
-        uint modifyIndex = j & 31U;
-        modifyIndex = ((modifyIndex >> 3) << 3) + 7U - (modifyIndex & 7U);
-        uint mask = 1 << modifyIndex;
-        if (const_code[getcharAt(dfileContent, id) + ((j - start) << 8)]) {
-          atomicOr(&d_compressedFile[compressedFilePos], mask);
-        } else {
-          atomicAnd(&d_compressedFile[compressedFilePos], ~mask);
-        }
-      }
-    }
-    id += stepSize;
+__global__ void print_dict(uint *d_dictionary_code,
+                           unsigned char *d_dictionary_codelens) {
+  for (int i = 0; i < 256; i++) {
+    printf("%c\t|\t%d\t|\t", i, d_dictionary_codelens[i]);
+    for (unsigned char j = 0; j < d_dictionary_codelens[i]; j++)
+      printf("%d", (1 & (d_dictionary_code[i] >> (31 - j))));
+    printf("\n");
   }
 }
