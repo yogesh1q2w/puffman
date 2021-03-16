@@ -11,11 +11,11 @@ __global__ void cu_histgram(unsigned int *d_PartialHistograms,
 __global__ void mergeHistogram(unsigned int *d_Histogram,
                                unsigned int *d_PartialHistograms);
 
-__global__ void encode(uint fileSize, uint *dfileContent, uint *dbitOffsets,
+__global__ void encode(uint fileSize, uint *dfileContent, volatile int *dbitOffsets,
                        uint *d_boundary_index, uint *d_compressedFile,
                        uint *d_dictionary_code,
                        unsigned char *d_dictionary_codelens, uint *counter,
-                       uint numTasks);
+                       uint numTasks, uint numThreadTasks);
 
 __global__ void print_dict(uint *d_dictionary_code,
                            unsigned char *d_dictionary_codelens);

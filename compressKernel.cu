@@ -82,11 +82,11 @@ __device__ inline unsigned char getcharAt(uint *dfileContent, uint pos) {
   return (dfileContent[pos >> 2] >> ((pos & 3U) << 3)) & 0xFFU;
 }
 
-__global__ void encode(uint fileSize, uint *dfileContent, uint *dbitOffsets,
-                       uint *d_boundary_index, uint *d_compressedFile,
-                       uint *d_dictionary_code,
+__global__ void encode(uint fileSize, uint *dfileContent,
+                       volatile int *dbitOffsets, uint *d_boundary_index,
+                       uint *d_compressedFile, uint *d_dictionary_code,
                        unsigned char *d_dictionary_codelens, uint *counter,
-                       uint numTasks) {
+                       uint numTasks, uint numThreadTasks) {
   uint task_idx = 0;
   uint threadInput_idx = 0;
   uint *threadInput, *threadBoundaryIndex;
@@ -109,7 +109,50 @@ __global__ void encode(uint fileSize, uint *dfileContent, uint *dbitOffsets,
   threadInput_idx = (task_idx * blockDim.x + threadIdx.x) * PER_THREAD_PROC;
 
   while (task_idx < numTasks) {
-    threadInput = dfileContent + (threadInput_idx / 4);
+    int prev_offset;
+    uint threadtaskId = threadInput_idx / PER_THREAD_PROC;
+    if (threadtaskId >= numThreadTasks)
+      break;
+    while (1) {
+      if (dbitOffsets[threadtaskId] != -1) {
+        prev_offset = dbitOffsets[threadtaskId];
+        printf("out of while as dbitOffset[%d] is %d for thread- %d\n", threadtaskId, prev_offset, threadIdx.x);
+        threadInput = dfileContent + (threadInput_idx / 4);
+        uint input = threadInput[0];
+        uint thresh = ceil(prev_offset / (1. * BLOCK_SIZE)) * BLOCK_SIZE;
+        uint i, curr_offset;
+        for (i = 1; (i < PER_THREAD_PROC) && (threadInput_idx + i < fileSize);
+             i++) {
+          if ((i & 3) == 0)
+            input = threadInput[i / 4];
+          curr_offset =
+              sh_dictionary.codeSize[GET_CHAR(input, (i & 3))] + prev_offset;
+          if (curr_offset > thresh) {
+            d_boundary_index[i - 1] = prev_offset;
+            prev_offset = thresh;
+            thresh += BLOCK_SIZE;
+            i--;
+          } else if (curr_offset == thresh) {
+            thresh += BLOCK_SIZE;
+            prev_offset = curr_offset;
+          } else {
+            prev_offset = curr_offset;
+          }
+        }
+        if (prev_offset +
+                sh_dictionary.codeSize[GET_CHAR(input, ((i - 1) & 3))] >
+            thresh) {
+          d_boundary_index[i - 1] = prev_offset;
+          curr_offset = thresh;
+        }
+        if (threadtaskId < numThreadTasks)
+          dbitOffsets[threadtaskId + 1] =
+              curr_offset +
+              sh_dictionary.codeSize[GET_CHAR(threadInput[4], ((i - 1) & 3))];
+        break;
+      }
+    }
+
     threadBoundaryIndex = d_boundary_index + threadInput_idx;
     uint inputPosInThreadTask = 0;
     uint outputPos = dbitOffsets[threadInput_idx] / 32;
