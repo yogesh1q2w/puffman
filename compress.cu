@@ -7,6 +7,10 @@
 #include "constants.h"
 #include "huffman.h"
 
+#include <thrust/binary_search.h>
+#include <thrust/execution_policy.h>
+#include <thrust/scan.h>
+
 using namespace std;
 
 uint blockSize = BLOCK_SIZE;
@@ -17,6 +21,9 @@ unsigned char useSharedMemory;
 unsigned long long int fileSize;
 uint intFileSize;
 uint frequency[256];
+uint *d_dictionary_code;
+unsigned char *d_dictionary_codelens;
+uint *counter;
 
 void printDictionary(uint *frequency) {
   for (unsigned short i = 0; i < 256; i++) {
@@ -66,47 +73,61 @@ inline unsigned char getcharAt(uint pos) {
   return (fileContent[pos >> 2] >> ((pos & 3U) << 3)) & 0xFFU;
 }
 
-// void printOut(uint *out, uint size) {
-//   cout << "The file written was-\n";
-//   for (uint i = 0; i < size; i++) {
-//     for (uint j = 0; j < 32; j++)
-//       cout << int(1 & (out[i] >> (31-j)));
-//   }
-//   cout << "\n-------------------------------------------------------" << endl;
-// }
+void printOut(uint *out, uint size) {
+  cout << "The file written was-\n";
+  for (uint i = 0; i < size; i++) {
+    for (uint j = 0; j < 32; j++)
+      cout << int(1 & (out[i] >> (31 - j)));
+  }
+  cout << "\n-------------------------------------------------------" << endl;
+}
 
-void getOffsetArray(uint *bitOffsets, uint *boundary_index,
+void getOffsetArray(uint *dbitOffsets, uint *boundary_index,
                     uint &encodedFileSize) {
-  bitOffsets[0] = 0;
-  uint searchValue = BLOCK_SIZE;
-  uint i;
-  for (i = 1; i < fileSize; i++) {
-    bitOffsets[i] = bitOffsets[i - 1] + dictionary.codeSize[getcharAt(i - 1)];
+  cudaMalloc(&counter, sizeof(uint));
+  cudaMemset(counter, 0, sizeof(uint));
+  cudaMalloc(&d_dictionary_codelens, 256 * sizeof(unsigned char));
+  cudaMemcpy(d_dictionary_codelens, dictionary.codeSize,
+             256 * sizeof(unsigned char), cudaMemcpyHostToDevice);
+  uint numTasks = ceil(fileSize / (256. * PER_THREAD_PROC));
+  cout << "initializing offsets now..." << endl;
+  initOffsets<<<BLOCK_NUM, 256>>>(fileSize, dfileContent, dbitOffsets,
+                                  d_dictionary_codelens, counter, numTasks);
+  cudaDeviceSynchronize();
+  cout << "Going for exclusive scan..." << endl;
+  thrust::exclusive_scan(thrust::device, dbitOffsets, dbitOffsets + fileSize,
+                         dbitOffsets, 0);
+  uint modifyIndex = 0;
+  float searchValue = BLOCK_SIZE;
 
-    if (bitOffsets[i] > searchValue) {
-      boundary_index[i - 1] = bitOffsets[i - 1];
-      bitOffsets[i - 1] = searchValue;
-      searchValue += BLOCK_SIZE;
-      i--;
-    } else if (bitOffsets[i] == searchValue) {
-      searchValue += BLOCK_SIZE;
-    }
+  while (1) {
+    if (modifyIndex == fileSize - 1)
+      break;
+    modifyIndex =
+        (thrust::lower_bound(thrust::device, dbitOffsets + modifyIndex,
+                             dbitOffsets + fileSize, searchValue + 0.1) -
+         dbitOffsets) -
+        1;
+    // cout << "MODIFYINDEX FOR " << searchValue << " IS " << modifyIndex << endl;
+    if (modifyIndex == fileSize - 1)
+      break;
+    thrust::transform(thrust::device, dbitOffsets + modifyIndex,
+                      dbitOffsets + fileSize, dbitOffsets + modifyIndex,
+                      add_functor((uint)searchValue, modifyIndex, dbitOffsets));
+    // cudaMemcpy(bitOffsets, dbitOffsets, fileSize * sizeof(uint),
+    //            cudaMemcpyDeviceToHost);
+    // for (uint i = 0; i < fileSize; i++)
+    //   cout << bitOffsets[i] << ",";
+    // cout << endl;
+    searchValue += BLOCK_SIZE;
   }
-
-  if (bitOffsets[i - 1] + dictionary.codeSize[getcharAt(i - 1)] > searchValue) {
-    boundary_index[i - 1] = bitOffsets[i - 1];
-    bitOffsets[i - 1] = searchValue;
-  }
-  encodedFileSize =
-      bitOffsets[fileSize - 1] + dictionary.codeSize[getcharAt(fileSize - 1)];
 }
 
 void writeFileContents(FILE *outputFile) {
 
   uint *compressedFile, *d_compressedFile;
-  uint *bitOffsets, *dbitOffsets;
+  uint *dbitOffsets;
   uint *boundary_index, *d_boundary_index;
-  cudaMallocHost(&bitOffsets, fileSize * sizeof(uint));
   cudaMallocHost(&boundary_index, fileSize * sizeof(uint));
   cudaMemset(boundary_index, 0, fileSize * sizeof(uint));
   CUERROR
@@ -116,18 +137,17 @@ void writeFileContents(FILE *outputFile) {
 
   uint encodedFileSize;
   TIMER_START(offset)
-  getOffsetArray(bitOffsets, boundary_index, encodedFileSize);
+  getOffsetArray(dbitOffsets, boundary_index, encodedFileSize);
   TIMER_STOP(offset)
 
-  cudaMemcpy(dbitOffsets, bitOffsets, fileSize * sizeof(uint),
-             cudaMemcpyHostToDevice);
   cudaMemcpy(d_boundary_index, boundary_index, fileSize * sizeof(uint),
              cudaMemcpyHostToDevice);
   CUERROR
 
   // cout << "Prefix array and Boundary" << endl;
   // for (uint i = 0; i < fileSize; i++) {
-  //   cout << i << "-->" << bitOffsets[i] << " , " << boundary_index[i] << endl;
+  //   cout << i << "-->" << bitOffsets[i] << " , " << boundary_index[i] <<
+  //   endl;
   // }
 
   uint writeSize = (encodedFileSize + 31) >> 5;
@@ -137,27 +157,19 @@ void writeFileContents(FILE *outputFile) {
   cudaMalloc((void **)&d_compressedFile, writeSize * sizeof(uint));
   cudaMemset(d_compressedFile, 0, writeSize * sizeof(uint));
   CUERROR
-
-  uint *d_dictionary_code;
-  unsigned char *d_dictionary_codelens;
   cudaMalloc(&d_dictionary_code, 256 * sizeof(uint));
-  cudaMalloc(&d_dictionary_codelens, 256 * sizeof(unsigned char));
   cudaMemcpy(d_dictionary_code, dictionary.code, 256 * sizeof(uint),
-             cudaMemcpyHostToDevice);
-  cudaMemcpy(d_dictionary_codelens, dictionary.codeSize, 256 * sizeof(unsigned char),
              cudaMemcpyHostToDevice);
   // print_dict<<<1, 1>>>(d_dictionary_code, d_dictionary_codelens);
 
-  uint *counter;
-  cudaMalloc(&counter, sizeof(uint));
   cudaMemset(counter, 0, sizeof(uint));
 
   uint numTasks = ceil(fileSize / (256. * PER_THREAD_PROC));
 
   TIMER_START(kernel)
-  encode<<<BLOCK_NUM, 256>>>(fileSize, dfileContent, dbitOffsets,
-                             d_boundary_index, d_compressedFile, d_dictionary_code, d_dictionary_codelens,
-                             counter, numTasks);
+  encode<<<BLOCK_NUM, 256>>>(
+      fileSize, dfileContent, dbitOffsets, d_boundary_index, d_compressedFile,
+      d_dictionary_code, d_dictionary_codelens, counter, numTasks);
   TIMER_STOP(kernel)
   CUERROR
   cudaMemcpy(compressedFile, d_compressedFile, writeSize * sizeof(uint),
