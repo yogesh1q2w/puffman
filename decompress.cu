@@ -41,7 +41,7 @@ unsigned char *calculateOffsetAndWriteOutput(unsigned char *input,
                          offsets);
   cudaDeviceSynchronize();
 
-  ull outputSize;
+  uint outputSize;
   cudaMemcpy(&outputSize, offsets + noOfThreads, sizeof(unsigned),
              cudaMemcpyDeviceToHost);
   cudaMalloc(&dOutput, outputSize);
@@ -78,12 +78,19 @@ void readContentFromFile(ifstream &inputFile, ofstream &outputFile,
   size--;
   cudaMemcpyToSymbol(rootIndex, &size, sizeof(int));
 
-  ull maxSizeOfInputFile = findSizeOfInputFile(inputFile);
-  unsigned char *input, *output;
+  ull maxSizeOfInputFile = ceil(findSizeOfInputFile(inputFile)/4.);
+  cout << "MAXSIZEOFINPUTFILE: " << maxSizeOfInputFile << endl;
+  unsigned int *input, *output;
   cudaMallocHost(&input, maxSizeOfInputFile);
 
   inputFile.read((char *)input, maxSizeOfInputFile);
+
   ull noOfBytesRead = inputFile.gcount();
+  for(uint i=0; i<noOfBytesRead; i++) {
+		for(uint j=0; j<32; j++)
+			cout << ( 1 & (((uint)input[i]) >> (31-j)));
+	}
+  cout << "noOfBytesRead: " << noOfBytesRead << endl;
   output = calculateOffsetAndWriteOutput(input, noOfBytesRead, blockSize);
 
   outputFile.write((char *)output, sizeOfOriginalFile);

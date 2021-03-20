@@ -74,11 +74,14 @@ int HuffmanTree::createTreeFromFile(unsigned char *array, unsigned size,
     token = readByte(&array[offset + 1]);
     offset += 9;
     treeInArray[index].assignValues(token);
+    cout << 1 << token;
   } else {
     offset++;
+    cout << 0;
     int left = createTreeFromFile(array, size, offset, index);
     int right = createTreeFromFile(array, size, offset, index);
     treeInArray[index].assignValues(0, left, right);
+    
   }
   return index++;
 }
@@ -98,6 +101,7 @@ void HuffmanTree::readFromFile(ifstream &file) {
   unsigned offset = 0;
   int index = 0;
   createTreeFromFile(huffmanTreeInBytes, sizeOfHuffman, offset, index);
+  cout << endl;
 }
 
 void HuffmanTree::buildTreeFromFrequencies(unsigned int *frequency) {

@@ -26,6 +26,19 @@ void readAndPrintTree(FILE *fptr, uint noOfLeaves) {
   }
 }
 
+void readContent(FILE *fptr) {
+  uint fileContent[200];
+  uint readSize =
+      fread(fileContent, sizeof(unsigned char), 200, fptr);
+  cout << readSize <<endl;
+  for (uint i = 0; i < readSize; i++) {
+    for (uint j = 0; j < 32; j++) {
+      cout << (1 & (fileContent[i] >> (31-j)));
+    }
+  }
+  cout << endl;
+}
+
 int main() {
   FILE *fptr;
   fptr = fopen("compressed_output.bin", "rb");
@@ -40,4 +53,5 @@ int main() {
        << endl;
   readAndPrintTree(fptr, numLeaves);
   cout << endl;
+  readContent(fptr);
 }
