@@ -2,28 +2,81 @@
 #include <cstdio>
 using namespace std;
 
+typedef struct node {
+  char a;
+  struct node *l;
+  struct node *r;
+  bool isleaf;
+  node(char _a, node *_l, node *_r, bool _isleaf) {
+    a = _a;
+    l = _l;
+    r = _r;
+    isleaf = _isleaf;
+  }
+} node;
 
+node *createTree(unsigned char *huffmanTreeInBits, uint &i) {
+  unsigned char readBit = (huffmanTreeInBits[i / 8] >> (7 - (i % 8))) & 1;
+  i++;
+  if (readBit) {
+    cout << (int)readBit;
+    char x = 0;
+    for (uint j = 0; j < 8; j++) {
+      unsigned char tokenBit = (huffmanTreeInBits[i / 8] >> (7 - (i % 8))) & 1;
+      x = x | (tokenBit << (7 - j));
+      i++;
+    }
+    cout << x;
+    node *leaf = new node(x, NULL, NULL, true);
+    return leaf;
+  } else {
+    i++;
+    cout << (int)readBit;
+    node *left = createTree(huffmanTreeInBits, i);
+    node *right = createTree(huffmanTreeInBits, i);
+    return new node(0, left, right, false);
+  }
+}
 
-void readAndPrintTree(FILE *fptr, uint noOfLeaves) {
+node *readAndPrintTree(FILE *fptr, uint noOfLeaves) {
   unsigned sizeOfHuffman = 10 * noOfLeaves - 1;
   unsigned char huffmanTreeInBits[(unsigned)ceil(sizeOfHuffman / 8.)];
   fread((char *)huffmanTreeInBits, 1, (unsigned)ceil(sizeOfHuffman / 8.), fptr);
-  for (uint i = 0; i < sizeOfHuffman;) {
-    unsigned char readBit = (huffmanTreeInBits[i/8] >> (7 - (i%8))) & 1;
-    i++;
-    if (readBit) {
-      cout << (int)readBit;
-      char x =0;
-      for (uint j = 0; j < 8; j++) {
-        unsigned char tokenBit = (huffmanTreeInBits[i/8] >> (7 - (i%8))) & 1;
-        x = x | (tokenBit << (7 - j));
-        i++;
-      }
-      cout << (char)x ;
+  uint i = 0;
+  node *root = createTree(huffmanTreeInBits, i);
+  return root;
+}
+
+void readContent(FILE *fptr, uint fileSize, node *root, uint blockSize) {
+  FILE *tptr = fptr;
+  fseek(tptr, 0L, SEEK_END);
+  uint enc_size = ftell(tptr);
+  unsigned char encoding[enc_size];
+  uint readSize = fread(encoding, sizeof(unsigned char), enc_size, fptr);
+  cout << readSize << endl;
+  unsigned char file[fileSize];
+  uint i = 0;
+  uint file_loc = 0;
+  node *temp = root;
+  while (1) {
+    if (file_loc == fileSize)
+      break;
+    uint bit = (1 & (encoding[i / 8] >> (7 - (i % 8))));
+    if (bit) {
+      temp = temp->l;
     } else {
-      cout << (int)readBit;
+      temp = temp->r;
+    }
+    if (temp->isleaf) {
+      file[file_loc] = temp->a;
+      file_loc++;
+      temp = root;
+      cout << temp->a;
+    } else if (i % blockSize == 0) {
+      temp = root;
     }
   }
+  cout << endl;
 }
 
 int main() {
@@ -33,11 +86,13 @@ int main() {
   fread(&fileSize, sizeof(long long int), 1, fptr);
   cout << "file Size read = " << fileSize << endl;
   uint blockSize;
-  fread(&blockSize,sizeof(uint), 1, fptr);
+  fread(&blockSize, sizeof(uint), 1, fptr);
   uint numLeaves;
   fread(&numLeaves, sizeof(uint), 1, fptr);
   cout << "Block size = " << blockSize << "\nNum Leaves = " << numLeaves
        << endl;
-  readAndPrintTree(fptr, numLeaves);
+  node *root = readAndPrintTree(fptr, numLeaves);
   cout << endl;
+  readContent(fptr, fileSize, root, blockSize);
+  return 0;
 }
