@@ -3,6 +3,7 @@ compress
 compressed_output.bin
 decompress
 decompressed_output
+decompressed_out_seq
 testFile.txt
 test.txt
 compressed_testFile.bin
