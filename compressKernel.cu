@@ -112,8 +112,12 @@ __global__ void encode(uint fileSize, uint *dfileContent, uint *dbitOffsets,
     threadInput = dfileContent + (threadInput_idx / 4);
     threadBoundaryIndex = d_boundary_index + threadInput_idx;
     uint inputPosInThreadTask = 0;
-    uint outputPos = dbitOffsets[threadInput_idx] / 32;
-    uint startPosInOutputWord = dbitOffsets[threadInput_idx] % 32;
+    uint outputPos = (d_boundary_index[threadInput_idx] == 0)
+                         ? dbitOffsets[threadInput_idx] / 32
+                         : d_boundary_index[threadInput_idx] / 32;
+    uint startPosInOutputWord = (d_boundary_index[threadInput_idx] == 0)
+                                    ? dbitOffsets[threadInput_idx] % 32
+                                    : d_boundary_index[threadInput_idx] % 32;
     uint outputWord = 0;
     uint input = 0;
     uint pendingBitsFromPreviousCode;
@@ -128,9 +132,10 @@ __global__ void encode(uint fileSize, uint *dfileContent, uint *dbitOffsets,
       code >>= (32 - code_length);
       uint boundary_pos = threadBoundaryIndex[inputPosInThreadTask];
       if (boundary_pos != 0) {
-        code >>= (code_length -
-                  (BLOCK_SIZE * ((uint)ceil(boundary_pos / (1. * BLOCK_SIZE)) -
-                                 boundary_pos)));
+        code >>=
+            (code_length -
+             (BLOCK_SIZE * ((uint)ceil(boundary_pos / (1. * BLOCK_SIZE)))) +
+             boundary_pos);
         code_length =
             BLOCK_SIZE * ((uint)ceil(boundary_pos / (1. * BLOCK_SIZE))) -
             boundary_pos;
@@ -161,6 +166,8 @@ __global__ void encode(uint fileSize, uint *dfileContent, uint *dbitOffsets,
     if (threadIdx.x == 0) {
       shared_task_idx = atomicAdd(counter, 1);
     }
+    // return;
+
     __syncthreads();
 
     task_idx = shared_task_idx;

@@ -66,14 +66,14 @@ inline unsigned char getcharAt(uint pos) {
   return (fileContent[pos >> 2] >> ((pos & 3U) << 3)) & 0xFFU;
 }
 
-// void printOut(uint *out, uint size) {
-//   cout << "The file written was-\n";
-//   for (uint i = 0; i < size; i++) {
-//     for (uint j = 0; j < 32; j++)
-//       cout << int(1 & (out[i] >> (31-j)));
-//   }
-//   cout << "\n-------------------------------------------------------" << endl;
-// }
+void printOut(uint *out, uint size) {
+  cout << "The file written was-\n";
+  for (uint i = 0; i < size; i++) {
+    for (uint j = 0; j < 32; j++)
+      cout << int(1 & (out[i] >> (31-j)));
+  }
+  cout << "\n-------------------------------------------------------" << endl;
+}
 
 void getOffsetArray(uint *bitOffsets, uint *boundary_index,
                     uint &encodedFileSize) {
@@ -88,6 +88,7 @@ void getOffsetArray(uint *bitOffsets, uint *boundary_index,
       bitOffsets[i - 1] = searchValue;
       searchValue += BLOCK_SIZE;
       i--;
+      // cout << "BOUNDARY AT " << i << " = " << bitOffsets[i] << endl;
     } else if (bitOffsets[i] == searchValue) {
       searchValue += BLOCK_SIZE;
     }
