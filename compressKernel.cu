@@ -108,7 +108,7 @@ __global__ void encode(uint fileSize, uint *dfileContent, uint *dbitOffsets,
   task_idx = shared_task_idx;
   threadInput_idx = (task_idx * blockDim.x + threadIdx.x) * PER_THREAD_PROC;
 
-  while (task_idx < numTasks) {
+  while (task_idx < numTasks && threadInput_idx < fileSize) {
     threadInput = dfileContent + (threadInput_idx / 4);
     threadBoundaryIndex = d_boundary_index + threadInput_idx;
     uint inputPosInThreadTask = 0;

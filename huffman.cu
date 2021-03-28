@@ -91,10 +91,10 @@ void HuffmanTree::readFromFile(FILE *file) {
   uint offset = 0;
   uint index = 0;
   createTreeFromFile(huffmanTree, offset, index);
-  for (uint i = 0; i < numNodes; i++) {
-    cout <<i<<") " << tree.token[i] << "," << tree.left[i] << "," << tree.right[i]
-         << endl;
-  }
+  // for (uint i = 0; i < numNodes; i++) {
+  //   cout <<i<<") " << tree.token[i] << "," << tree.left[i] << "," << tree.right[i]
+  //        << endl;
+  // }
 }
 
 void HuffmanTree::buildTreeFromFrequencies(unsigned int *frequency) {
