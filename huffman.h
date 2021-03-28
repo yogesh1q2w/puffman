@@ -5,52 +5,46 @@
 #include <vector>
 
 using namespace std;
+void fatal(const char* str);
 
 struct TreeNode {
   unsigned char token;
   TreeNode *left, *right;
-  TreeNode(unsigned char token, TreeNode *left=nullptr, TreeNode *right=nullptr);
+  TreeNode(unsigned char token, TreeNode *left = nullptr,
+           TreeNode *right = nullptr);
 };
 
 class codedict {
 public:
-  unsigned int code[256];
+  uint code[256];
   unsigned char codeSize[256];
 };
 
-struct TreeArrayNode {
-  unsigned char token;
-  int left, right;
-  void assignValues(unsigned char, int, int);
+struct TreeArray {
+  unsigned char *token;
+  int *left, *right;
 };
 
 class HuffmanTree {
 private:
   TreeNode *root;
-  int createTreeFromFile(unsigned char *array, unsigned size, unsigned &offset,
-                         int &index);
+  uint createTreeFromFile(unsigned char *array, uint &offset, uint &index);
   void deleteTree(TreeNode *node);
-  void constructTree(TreeNode *node, unsigned int *bitsRepTree,
-                     unsigned int &pos);
-  unsigned char _heightOfTree(TreeNode *node);
+  void constructTree(TreeNode *node, unsigned char *bitsRepTree,
+                     uint &pos);
 
-
-  void buildTreeFromFrequencies(unsigned int *frequency);
+  void buildTreeFromFrequencies(uint *frequency);
   void getCodes(TreeNode *node, uint &code, unsigned char len,
                 codedict &dictionary);
 
 public:
-  unsigned int *tree;
-  unsigned int noOfLeaves;
+  TreeArray tree;
+  uint noOfLeaves;
   HuffmanTree();
-  void readFromFile(std::ifstream &file);
+  void readFromFile(FILE *file);
   ~HuffmanTree();
-  unsigned char heightOfTree();
   void writeTree(FILE *fptr);
-
-
-  void HuffmanCodes(unsigned int *freq, codedict &dictionary);
-
+  void HuffmanCodes(uint *freq, codedict &dictionary);
 };
 
 #endif

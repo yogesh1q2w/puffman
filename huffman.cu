@@ -12,6 +12,11 @@
 
 using namespace std;
 
+void fatal(const char* str){
+	fprintf( stderr, "%s! at %s in %d\n", str, __FILE__, __LINE__);
+	exit(EXIT_FAILURE);
+}
+
 template <class T>
 inline const T minHeapPop(priority_queue<T, vector<T>, greater<T>> &heap) {
   const T top = heap.top();
@@ -19,31 +24,7 @@ inline const T minHeapPop(priority_queue<T, vector<T>, greater<T>> &heap) {
   return top;
 }
 
-unsigned char readByte(unsigned char *byte) {
-  unsigned char result = 0;
-  for (unsigned i = 0; i < 8; i++) {
-    assert(byte[i] == 0 || byte[i] == 1);
-    result = (result << 1) | byte[i];
-  }
-  return result;
-}
-
-void convertBitsToBytes(unsigned char *arrayInBits, unsigned char *arrayInBytes,
-                        unsigned size) {
-  unsigned sizeInBytes = ceil(size / 8.);
-  for (unsigned i = 0; i < sizeInBytes; i++)
-    for (unsigned j = 0; j < 8 && i * 8 + j < size; j++)
-      arrayInBytes[i * 8 + j] = (arrayInBits[i] >> (7 - j)) & 1;
-}
-
 TreeNode::TreeNode(unsigned char token, TreeNode *left, TreeNode *right) {
-  this->token = token;
-  this->left = left;
-  this->right = right;
-}
-
-void TreeArrayNode::assignValues(unsigned char token, int left = -1,
-                                 int right = -1) {
   this->token = token;
   this->left = left;
   this->right = right;
@@ -64,45 +45,61 @@ void HuffmanTree::deleteTree(TreeNode *node) {
   }
 }
 
-int HuffmanTree::createTreeFromFile(unsigned char *array, unsigned size,
-                                    unsigned &offset, int &index) {
-  unsigned char token = 0;
-  assert(offset < size);
-  assert(array[offset] == 0 || array[offset] == 1);
-  if (array[offset] == 1) {
-    token = readByte(&array[offset + 1]);
-    offset += 9;
-    treeInArray[index].assignValues(token);
+uint HuffmanTree::createTreeFromFile(unsigned char *huffmanTree, uint &offset,
+                                     uint &index) {
+  unsigned char readBit = (huffmanTree[offset / 8] >> (7 - (offset % 8))) & 1;
+  offset++;
+  uint index_copy = index;
+  index++;
+  if (readBit) {
+    unsigned char x = 0;
+    for (uint j = 0; j < 8; j++) {
+      unsigned char tokenBit =
+          (huffmanTree[offset / 8] >> (7 - (offset % 8))) & 1;
+      x = x | (tokenBit << (7 - j));
+      offset++;
+    }
+    tree.token[index_copy] = x;
+    tree.left[index_copy] = -1;
+    tree.right[index_copy] = -1;
+    return index_copy;
   } else {
-    offset++;
-    int left = createTreeFromFile(array, size, offset, index);
-    int right = createTreeFromFile(array, size, offset, index);
-    treeInArray[index].assignValues(0, left, right);
+    uint leftChildPos = createTreeFromFile(huffmanTree, offset, index);
+    uint rightChildPos = createTreeFromFile(huffmanTree, offset, index);
+    tree.token[index_copy] = 0;
+    tree.left[index_copy] = leftChildPos;
+    tree.right[index_copy] = rightChildPos;
+    return index_copy;
   }
-  return index++;
 }
 
 void HuffmanTree::readFromFile(FILE *file) {
-  unsigned int noOfLeaves;
-  fread(&noOfLeaves, sizeof(unsigned int),1,file);
-  unsigned sizeOfHuffmanTree = 10 * noOfLeaves - 1;
-  unsigned int huffmanTreeSize = ceil(sizeOfHuffmanTree / 32.);
-  unsigned int huffmanTree[huffmanTreeSize];
-  fread(huffmanTree, sizeof(uint), huffmanTreeSize, file);
+  if (1 != fread(&noOfLeaves, sizeof(uint), 1, file))
+    fatal("File read error 3");
+  cout <<"num leaves = " << noOfLeaves << endl;
+  uint numNodes = 2 * noOfLeaves - 1;
+  uint sizeOfHuffmanTree = 10 * noOfLeaves - 1;
+  uint huffmanTreeSize = ceil(sizeOfHuffmanTree / 8.);
 
-  unsigned char huffmanTreeInBytes[sizeOfHuffman];
+  unsigned char huffmanTree[huffmanTreeSize];
+  if(huffmanTreeSize != fread(huffmanTree, sizeof(unsigned char), huffmanTreeSize, file))fatal("File read error 4");
 
-  convertBitsToBytes(huffmanTreeInBits, huffmanTreeInBytes, sizeOfHuffman);
+  tree.token = new unsigned char[numNodes];
+  tree.left = new int[numNodes];
+  tree.right = new int[numNodes];
 
-  treeInArray.resize(2 * noOfLeaves - 1);
-  unsigned offset = 0;
-  int index = 0;
-  createTreeFromFile(huffmanTreeInBytes, sizeOfHuffman, offset, index);
+  uint offset = 0;
+  uint index = 0;
+  createTreeFromFile(huffmanTree, offset, index);
+  for (uint i = 0; i < numNodes; i++) {
+    cout <<i<<") " << tree.token[i] << "," << tree.left[i] << "," << tree.right[i]
+         << endl;
+  }
 }
 
 void HuffmanTree::buildTreeFromFrequencies(unsigned int *frequency) {
   typedef pair<uint, TreeNode *> pullt;
-  priority_queue<pullt, vector<pullt>, greater<pullt>> minHeap;
+  priority_queue<pullt, vector<pullt>, greater<pullt> > minHeap;
   noOfLeaves = 0;
   for (unsigned short i = 0; i < 256; i++) {
     if (frequency[i] > 0) {
@@ -121,8 +118,8 @@ void HuffmanTree::buildTreeFromFrequencies(unsigned int *frequency) {
   root = minHeap.top().second;
 }
 
-void HuffmanTree::getCodes(TreeNode *node, uint &code, unsigned char len,
-                           codedict &dictionary) {
+void HuffmanTree::getCodes(TreeNode *node, uint &code,
+                           unsigned char len, codedict &dictionary) {
   if ((node->left == nullptr) && (node->right == nullptr)) {
     dictionary.codeSize[node->token] = len;
     dictionary.code[node->token] = code;
@@ -130,12 +127,12 @@ void HuffmanTree::getCodes(TreeNode *node, uint &code, unsigned char len,
   }
 
   if (node->left != nullptr) {
-    code = code & (~(1 << (31 - len)));
+    code = code & (~(1 << (31-len)));
     getCodes(node->left, code, len + 1, dictionary);
   }
 
   if (node->right != nullptr) {
-    code = code | (1 << (31 - len));
+    code = code | (1 << (31-len));
     getCodes(node->right, code, len + 1, dictionary);
   }
 }
@@ -146,20 +143,20 @@ void HuffmanTree::HuffmanCodes(unsigned int *freq, codedict &dictionary) {
   getCodes(root, code, 0, dictionary);
 }
 
-void HuffmanTree::constructTree(TreeNode *node, unsigned int *bitsRepTree,
+void HuffmanTree::constructTree(TreeNode *node, unsigned char *bitsRepTree,
                                 unsigned int &pos) {
-  unsigned int bitRepPos = pos / 32;
-  unsigned int modifyIndex = 31 - pos % 32;
+  unsigned int bitRepPos = pos / 8;
+  unsigned int modifyIndex = 7 - pos % 8;
   if ((node->left == nullptr) && (node->right == nullptr)) {
     bitsRepTree[bitRepPos] = bitsRepTree[bitRepPos] | (1 << modifyIndex);
     ++pos;
     for (unsigned char i = 0; i < 8; i++) {
-      bitRepPos = pos / 32;
-      modifyIndex = 31 - (pos % 32);
-      unsigned int mask = (1 << modifyIndex);
+      bitRepPos = pos / 8;
+      modifyIndex = 7 - (pos % 8);
+      unsigned char mask = (1 << modifyIndex);
       bitsRepTree[bitRepPos] =
           (bitsRepTree[bitRepPos] & ~mask) |
-          ((((node->token >> (31 - i)) & 1) << modifyIndex) & mask);
+          ((((node->token >> (7 - i)) & 1) << modifyIndex) & mask);
       ++pos;
     }
   } else {
@@ -172,9 +169,9 @@ void HuffmanTree::constructTree(TreeNode *node, unsigned int *bitsRepTree,
 
 void HuffmanTree::writeTree(FILE *fptr) {
 
-  unsigned int writeTreeSize = ceil((10 * noOfLeaves - 1) / 32.);
-  unsigned int bitsRepTree[writeTreeSize];
+  unsigned int writeTreeSize = ceil((10 * noOfLeaves - 1) / 8.);
+  unsigned char bitsRepTree[writeTreeSize];
   unsigned int pos = 0;
   constructTree(root, bitsRepTree, pos);
-  fwrite(bitsRepTree, sizeof(unsigned int), ceil(pos / 32.), fptr);
+  fwrite(bitsRepTree, sizeof(unsigned char), ceil(pos / 8.), fptr);
 }

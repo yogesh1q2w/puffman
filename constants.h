@@ -39,4 +39,5 @@ static double sum_of_time = 0;
 
 #define MAX_FILE_NAME_SIZE 100
 #define MAX_THREADS_TO_USE 65536
+#define MAX_THREADS 1024
 typedef unsigned long long int ull;

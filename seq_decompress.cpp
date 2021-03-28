@@ -19,14 +19,17 @@ node *createTree(unsigned char *huffmanTreeInBits, uint &i) {
   unsigned char readBit = (huffmanTreeInBits[i / 8] >> (7 - (i % 8))) & 1;
   i++;
   if (readBit) {
+    cout << 1;
     char x = 0;
     for (uint j = 0; j < 8; j++) {
       unsigned char tokenBit = (huffmanTreeInBits[i / 8] >> (7 - (i % 8))) & 1;
       x = x | (tokenBit << (7 - j));
       i++;
     }
+    cout << x;
     return new node(x, NULL, NULL, true);
   } else {
+    cout << 0;
     node *left = createTree(huffmanTreeInBits, i);
     node *right = createTree(huffmanTreeInBits, i);
     return new node(0, left, right, false);

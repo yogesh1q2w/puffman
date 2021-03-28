@@ -164,7 +164,6 @@ void writeFileContents(FILE *outputFile) {
   cudaMemcpy(compressedFile, d_compressedFile, writeSize * sizeof(uint),
              cudaMemcpyDeviceToHost);
   CUERROR
-  fwrite(&writeSize, sizeof(uint), 1, outputFile);
   fwrite(compressedFile, sizeof(uint), writeSize, outputFile);
   fdatasync(outputFile->_fileno);
   cudaFree(d_compressedFile);
@@ -229,6 +228,7 @@ int main(int argc, char **argv) {
 
   TIMER_START(meta)
   fwrite(&fileSize, sizeof(unsigned long long int), 1, outputFile);
+  fwrite(&blockSize, sizeof(uint), 1, outputFile);
   fwrite(&tree.noOfLeaves, sizeof(uint), 1, outputFile);
   tree.writeTree(outputFile);
   TIMER_STOP(meta)
