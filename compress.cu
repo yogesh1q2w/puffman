@@ -66,15 +66,14 @@ inline unsigned char getcharAt(uint pos) {
   return (fileContent[pos >> 2] >> ((pos & 3U) << 3)) & 0xFFU;
 }
 
-// void printOut(uint *out, uint size) {
-//   cout << "The file written was-\n";
-//   for (uint i = 0; i < size; i++) {
-//     for (uint j = 0; j < 32; j++)
-//       cout << int(1 & (out[i] >> (31-j)));
-//   }
-//   cout << "\n-------------------------------------------------------" <<
-//   endl;
-// }
+void printOut(uint *out, uint size) {
+  cout << "The file written was-\n";
+  for (uint i = 0; i < size; i++) {
+    for (uint j = 0; j < 32; j++)
+      cout << int(1 & (out[i] >> (31 - j)));
+  }
+  cout << "\n-------------------------------------------------------" << endl;
+}
 
 void writeFileContents(FILE *outputFile) {
 
@@ -117,15 +116,26 @@ void writeFileContents(FILE *outputFile) {
 
   uint numTasks = ceil(fileSize / (256. * PER_THREAD_PROC));
   uint numThreadTasks = ceil(fileSize / (1. * PER_THREAD_PROC));
-  cudaMalloc((void**)&dbitOffset, numThreadTasks * sizeof(int));
-  cudaMemset(dbitOffset, -1, numThreadTasks * sizeof(int));
-  cudaMemset(dbitOffset, 0, sizeof(uint));
+  cout << "numthreadtask=" << numThreadTasks << endl;
+  cudaMalloc((void **)&dbitOffset, numThreadTasks * sizeof(int));
+  cudaMemset(dbitOffset, 0xFF, numThreadTasks * sizeof(int));
+  cudaMemset(dbitOffset, 0x00, sizeof(int));
+  CUERROR
+
+  // int bitOffset[numThreadTasks];
+  // cudaMemcpy(bitOffset, dbitOffset, numThreadTasks * sizeof(int),
+  //            cudaMemcpyDeviceToHost);
+
+  // cout << "Prefix array and Boundary" << endl;
+  // for (uint i = 0; i < numThreadTasks; i++) {
+  //   cout << i << "-->" << bitOffset[i] << endl;
+  // }
 
   TIMER_START(kernel)
   encode<<<BLOCK_NUM, 256>>>(fileSize, dfileContent, dbitOffset,
                              d_boundary_index, d_compressedFile,
-                             d_dictionary_code, d_dictionary_codelens, counter,
-                             numTasks, numThreadTasks);
+                             d_dictionary_code, d_dictionary_codelens,
+                             counter, numTasks, numThreadTasks);
   TIMER_STOP(kernel)
   CUERROR
   uint *compressedFileSize = (uint *)malloc(sizeof(uint));

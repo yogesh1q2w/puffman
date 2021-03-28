@@ -6,6 +6,7 @@ decompressed_output
 testFile.txt
 test.txt
 compressed_testFile.bin
+decompressed_out_seq
 .vs/
 .idea/
 a.out
