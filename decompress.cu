@@ -1,7 +1,7 @@
-#include <thrust/execution_policy.h>
-#include <thrust/scan.h>
 #include <bits/stdc++.h>
 #include <cuda.h>
+#include <thrust/execution_policy.h>
+#include <thrust/scan.h>
 #include <unistd.h>
 
 #include "decompressKernel.h"
@@ -9,86 +9,56 @@
 
 using namespace std;
 
+void decode(FILE *inputFile, FILE *outputFile, HuffmanTree tree, uint blockSize,
+            uint sizeOfFile, uint encodedFileSize, uint numNodes) {
+  uint *encodedString, *d_encodedString;
+  uint *decodedString, *d_decodedString;
+  uint *d_charOffset;
+  uint *d_taskCounter;
+  unsigned char *d_treeToken;
+  uint *d_treeLeft, *d_treeRight;
 
+  uint numBlocksInEncodedString = ceil(encodedFileSize / (1. * blockSize));
+  cudaMallocHost(&encodedString, sizeof(uint) * ((encodedFileSize + 3) / 4));
+  cudaMallocHost(&decodedString, sizeof(uint) * ((sizeOfFile + 3) / 4));
 
-// inline unsigned findNoOfThreadBlocks(unsigned totalNoOfThreads) {
-//   unsigned noOfThreadBlocks = ceil((double)totalNoOfThreads / MAX_THREADS);
-//   return noOfThreadBlocks;
-// }
+  if (((encodedFileSize + 3) / 4) !=
+      fread(encodedString, sizeof(uint), (encodedFileSize + 3) / 4, inputFile))
+    fatal("File read error 4");
 
-// unsigned char *calculateOffsetAndWriteOutput(unsigned char *input,
-//                                              ull size, unsigned blockSize) {
-//   unsigned *offsets;
-//   unsigned char *dOutput, *dInput, *dInputInBytes;
-//   cudaMalloc(&dInput, size);
-//   cudaMemcpy(dInput, input, size, cudaMemcpyHostToDevice);
-//   cudaFreeHost(input);
-//   cudaMalloc(&dInputInBytes, size * 8);
-//   unsigned noOfThreads = ceil(((double)size) / blockSize);
-//   unsigned noOfThreadBlocks = findNoOfThreadBlocks(noOfThreads);
+  cudaMalloc((void **)&d_encodedString,
+             sizeof(uint) * ((encodedFileSize + 3) / 4));
+  cudaMalloc((void **)&d_decodedString, sizeof(uint) * ((sizeOfFile + 3) / 4));
+  cudaMalloc((void **)&d_charOffset,
+             sizeof(uint) * (numBlocksInEncodedString + 1));
+  cudaMalloc((void **)&d_taskCounter, sizeof(uint));
+  cudaMalloc((void **)&d_treeToken, sizeof(unsigned char) * numNodes);
+  cudaMalloc((void **)&d_treeLeft, sizeof(uint) * numNodes);
+  cudaMalloc((void **)&d_treeRight, sizeof(uint) * numNodes);
 
-//   convertBitsToBytes<<<noOfThreadBlocks, MAX_THREADS>>>(dInput, dInputInBytes,
-//                                                         size, blockSize);
-//   cudaDeviceSynchronize();
-//   cudaFree(dInput);
-//   cudaMalloc(&offsets, (noOfThreads + 1) * sizeof(unsigned));
+  cudaMemset(d_taskCounter, 0, sizeof(uint));
+  cudaMemset(d_charOffset, 0, sizeof(uint) * (numBlocksInEncodedString + 1));
+  cudaMemset(d_decodedString, 0, sizeof(uint) * ((sizeOfFile + 3) / 4));
 
-//   calculateNoOfTokensInBlock<<<noOfThreadBlocks, MAX_THREADS>>>(
-//       dInputInBytes, size * 8, blockSize * 8, offsets);
-//   cudaDeviceSynchronize();
+  cudaMemcpy(d_encodedString, encodedString,
+             sizeof(uint) * ((encodedFileSize + 3) / 4),
+             cudaMemcpyHostToDevice);
+  cudaMemcpy(d_treeToken, tree.tree.token, numNodes * sizeof(unsigned char),
+             cudaMemcpyHostToDevice);
+  cudaMemcpy(d_treeLeft, tree.tree.left, numNodes * sizeof(uint),
+             cudaMemcpyHostToDevice);
+  cudaMemcpy(d_treeRight, tree.tree.right, numNodes * sizeof(uint),
+             cudaMemcpyHostToDevice);
+  uint shm_needed = numNodes * 9;
 
-//   thrust::exclusive_scan(thrust::device, offsets, offsets + noOfThreads + 1,
-//                          offsets);
-//   cudaDeviceSynchronize();
-
-//   ull outputSize;
-//   cudaMemcpy(&outputSize, offsets + noOfThreads, sizeof(unsigned),
-//              cudaMemcpyDeviceToHost);
-//   cudaMalloc(&dOutput, outputSize);
-//   writeOutput<<<noOfThreadBlocks, MAX_THREADS>>>(
-//       dInputInBytes, dOutput, size * 8, blockSize * 8, offsets);
-//   cudaDeviceSynchronize();
-
-//   cudaFree(offsets);
-//   cudaFree(dInputInBytes);
-
-//   unsigned char* output;
-//   cudaMallocHost(&output, outputSize);
-//   cudaMemcpy(output, dOutput, outputSize,
-//              cudaMemcpyDeviceToHost);
-//   cudaFree(dOutput);
-//   return output;
-// }
-
-// ull findSizeOfInputFile(ifstream& inputFile) {
-//   streampos currentPositionInFile = inputFile.tellg();
-//   inputFile.seekg(0, inputFile.end);
-//   ull maxSizeOfInputFile = inputFile.tellg();
-//   inputFile.seekg(currentPositionInFile);
-//   return maxSizeOfInputFile;
-// }
-
-// void readContentFromFile(ifstream &inputFile, ofstream &outputFile,
-//                          const HuffmanTree &tree, unsigned blockSize,
-//                          ull sizeOfOriginalFile) {
-
-//   unsigned size = tree.treeInArray.size();
-//   cudaMemcpyToSymbol(deviceTree, tree.treeInArray.data(),
-//                      size * sizeof(TreeArrayNode));
-//   size--;
-//   cudaMemcpyToSymbol(rootIndex, &size, sizeof(int));
-
-//   ull maxSizeOfInputFile = findSizeOfInputFile(inputFile);
-//   unsigned char *input, *output;
-//   cudaMallocHost(&input, maxSizeOfInputFile);
-
-//   inputFile.read((char *)input, maxSizeOfInputFile);
-//   ull noOfBytesRead = inputFile.gcount();
-//   output = calculateOffsetAndWriteOutput(input, noOfBytesRead, blockSize);
-
-//   outputFile.write((char *)output, sizeOfOriginalFile);
-//   cudaFreeHost(output);
-// }
+  single_shot_decode<<<BLOCK_NUM, 256, shm_needed>>>(
+      d_encodedString, encodedFileSize, d_treeToken, d_treeLeft, d_treeRight,
+      d_charOffset, numBlocksInEncodedString, d_decodedString, sizeOfFile,
+      d_taskCounter, numNodes);
+  cudaMemcpy(decodedString, d_decodedString, sizeof(char) * sizeOfFile,
+             cudaMemcpyDeviceToHost);
+  fwrite(decodedString, sizeof(char), sizeOfFile, outputFile);
+}
 
 int main(int argc, char *argv[]) {
   if (argc != 2) {
@@ -106,14 +76,20 @@ int main(int argc, char *argv[]) {
 
   ull sizeOfFile;
   unsigned int blockSize;
-  if(1 != fread(&sizeOfFile, sizeof(ull), 1, inputFile))fatal("File read error 1");
-  if(1 != fread(&blockSize, sizeof(uint), 1, inputFile))fatal("File read error 2");
+  if (1 != fread(&sizeOfFile, sizeof(ull), 1, inputFile))
+    fatal("File read error 1");
+  if (1 != fread(&blockSize, sizeof(uint), 1, inputFile))
+    fatal("File read error 2");
   cout << sizeOfFile << "," << blockSize << endl;
 
   HuffmanTree tree;
   tree.readFromFile(inputFile);
-
-  // readContentFromFile(file, outputFile, tree, blockSize, sizeOfFile);
+  uint encodedFileSize;
+  if (1 != fread(&encodedFileSize, sizeof(uint), 1, inputFile))
+    fatal("File read error 3");
+  cout << "Encoded file size = " << encodedFileSize << endl;
+  decode(inputFile, outputFile, tree, blockSize, sizeOfFile, encodedFileSize,
+         2 * tree.noOfLeaves - 1);
   fclose(inputFile);
   fclose(outputFile);
 

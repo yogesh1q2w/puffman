@@ -39,22 +39,21 @@ node *createTree(unsigned char *huffmanTreeInBits, uint &i) {
 node *readAndPrintTree(FILE *fptr, uint noOfLeaves) {
   unsigned sizeOfHuffman = 10 * noOfLeaves - 1;
   unsigned char huffmanTreeInBits[(unsigned)ceil(sizeOfHuffman / 8.)];
-  fread((char *)huffmanTreeInBits, 1, (unsigned)ceil(sizeOfHuffman / 8.), fptr);
+  fread(huffmanTreeInBits, 1, (unsigned)ceil(sizeOfHuffman / 8.), fptr);
   uint i = 0;
   node *root = createTree(huffmanTreeInBits, i);
+  cout << endl;
   return root;
 }
 
 void readContent(FILE *fptr, uint fileSize, node *root, uint blockSize) {
 
-  fpos_t ftell_val;
-  fgetpos(fptr, &ftell_val);
-  uint current = ftell(fptr);
-  fseek(fptr, 0L, SEEK_END);
-  uint enc_size = ftell(fptr) - current;
-  fsetpos(fptr, &ftell_val);
-  unsigned int encoding[(uint)ceil(enc_size/4.)];
-  uint readSize = fread(encoding, sizeof(unsigned int), ceil(enc_size/4.), fptr);
+  uint enc_size;
+  fread(&enc_size, sizeof(uint), 1, fptr);
+  cout << "Encoded size = " << enc_size << endl;
+  unsigned int encoding[(uint)ceil(enc_size / 32.)];
+  uint readSize =
+      fread(encoding, sizeof(unsigned int), ceil(enc_size / 32.), fptr);
   unsigned char file[fileSize];
   uint i = 0;
   uint file_loc = 0;
@@ -81,7 +80,6 @@ void readContent(FILE *fptr, uint fileSize, node *root, uint blockSize) {
   FILE *optr;
   optr = fopen("decompressed_out_seq", "wb");
   fwrite(file, sizeof(unsigned char), fileSize, optr);
-
 }
 
 int main() {

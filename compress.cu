@@ -70,7 +70,7 @@ void printOut(uint *out, uint size) {
   cout << "The file written was-\n";
   for (uint i = 0; i < size; i++) {
     for (uint j = 0; j < 32; j++)
-      cout << int(1 & (out[i] >> (31-j)));
+      cout << int(1 & (out[i] >> (31 - j)));
   }
   cout << "\n-------------------------------------------------------" << endl;
 }
@@ -128,7 +128,8 @@ void writeFileContents(FILE *outputFile) {
 
   // cout << "Prefix array and Boundary" << endl;
   // for (uint i = 0; i < fileSize; i++) {
-  //   cout << i << "-->" << bitOffsets[i] << " , " << boundary_index[i] << endl;
+  //   cout << i << "-->" << bitOffsets[i] << " , " << boundary_index[i] <<
+  //   endl;
   // }
 
   uint writeSize = (encodedFileSize + 31) >> 5;
@@ -145,8 +146,8 @@ void writeFileContents(FILE *outputFile) {
   cudaMalloc(&d_dictionary_codelens, 256 * sizeof(unsigned char));
   cudaMemcpy(d_dictionary_code, dictionary.code, 256 * sizeof(uint),
              cudaMemcpyHostToDevice);
-  cudaMemcpy(d_dictionary_codelens, dictionary.codeSize, 256 * sizeof(unsigned char),
-             cudaMemcpyHostToDevice);
+  cudaMemcpy(d_dictionary_codelens, dictionary.codeSize,
+             256 * sizeof(unsigned char), cudaMemcpyHostToDevice);
   // print_dict<<<1, 1>>>(d_dictionary_code, d_dictionary_codelens);
 
   uint *counter;
@@ -156,14 +157,16 @@ void writeFileContents(FILE *outputFile) {
   uint numTasks = ceil(fileSize / (256. * PER_THREAD_PROC));
 
   TIMER_START(kernel)
-  encode<<<BLOCK_NUM, 256>>>(fileSize, dfileContent, dbitOffsets,
-                             d_boundary_index, d_compressedFile, d_dictionary_code, d_dictionary_codelens,
-                             counter, numTasks);
+  encode<<<BLOCK_NUM, 256>>>(
+      fileSize, dfileContent, dbitOffsets, d_boundary_index, d_compressedFile,
+      d_dictionary_code, d_dictionary_codelens, counter, numTasks);
   TIMER_STOP(kernel)
   CUERROR
   cudaMemcpy(compressedFile, d_compressedFile, writeSize * sizeof(uint),
              cudaMemcpyDeviceToHost);
   CUERROR
+  cout << "enc file size = " << encodedFileSize << endl;
+  fwrite(&encodedFileSize, sizeof(uint), 1, outputFile);
   fwrite(compressedFile, sizeof(uint), writeSize, outputFile);
   fdatasync(outputFile->_fileno);
   cudaFree(d_compressedFile);
