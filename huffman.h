@@ -30,7 +30,7 @@ private:
   int createTreeFromFile(unsigned char *array, unsigned size, unsigned &offset,
                          int &index);
   void deleteTree(TreeNode *node);
-  void constructTree(TreeNode *node, unsigned char *bitsRepTree,
+  void constructTree(TreeNode *node, unsigned int *bitsRepTree,
                      unsigned int &pos);
   unsigned char _heightOfTree(TreeNode *node);
 
@@ -40,7 +40,7 @@ private:
                 codedict &dictionary);
 
 public:
-  vector<TreeArrayNode> treeInArray;
+  unsigned int *tree;
   unsigned int noOfLeaves;
   HuffmanTree();
   void readFromFile(std::ifstream &file);

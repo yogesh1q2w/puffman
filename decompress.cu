@@ -96,25 +96,26 @@ int main(int argc, char *argv[]) {
     return 0;
   }
   char *filename = argv[1];
-  ifstream file(filename, ios::in | ios::binary);
-  if (!file) {
+  FILE *inputFile, *outputFile;
+  inputFile = fopen(filename, "rb");
+  if (!inputFile) {
     cout << "The file could not be opened" << endl;
     return 0;
   }
+  outputFile = fopen("decompressed_output", "wb");
+
   ull sizeOfFile;
   unsigned int blockSize;
-  file.read((char *)&sizeOfFile, sizeof(ull));
-  file.read((char *)&blockSize, sizeof(unsigned int));
-  blockSize /= 8;
+  fread(&sizeOfFile, sizeof(ull), 1, inputFile);
+  blockSize = BLOCK_SIZE;
   cout << sizeOfFile << "," << blockSize << endl;
 
   HuffmanTree tree;
   tree.readFromFile(file);
-  ofstream outputFile("decompressed_output", ios::out | ios::binary);
 
   readContentFromFile(file, outputFile, tree, blockSize, sizeOfFile);
-  file.close();
-  outputFile.close();
+  fclose(inputFile);
+  fclose(outputFile);
 
   return 0;
 }
