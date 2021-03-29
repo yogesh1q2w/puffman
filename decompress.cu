@@ -21,9 +21,9 @@ void decode(FILE *inputFile, FILE *outputFile, HuffmanTree tree, uint blockSize,
   uint numBlocksInEncodedString = ceil(encodedFileSize / (1. * blockSize));
   cudaMallocHost(&encodedString, sizeof(uint) * ((encodedFileSize + 3) / 4));
   cudaMallocHost(&decodedString, sizeof(uint) * ((sizeOfFile + 3) / 4));
-
-  if (((encodedFileSize + 3) / 4) !=
-      fread(encodedString, sizeof(uint), (encodedFileSize + 3) / 4, inputFile))
+  // cout << fread(encodedString, sizeof(uint), (encodedFileSize + 3) / 4, inputFile) << " and " << (encodedFileSize+3)/4 << endl;
+  if (((encodedFileSize + 31) / 32) !=
+      fread(encodedString, sizeof(uint), (encodedFileSize + 31) / 32, inputFile))
     fatal("File read error 4");
 
   cudaMalloc((void **)&d_encodedString,
@@ -50,11 +50,11 @@ void decode(FILE *inputFile, FILE *outputFile, HuffmanTree tree, uint blockSize,
   cudaMemcpy(d_treeRight, tree.tree.right, numNodes * sizeof(uint),
              cudaMemcpyHostToDevice);
   uint shm_needed = numNodes * 9;
-
-  single_shot_decode<<<BLOCK_NUM, 256, shm_needed>>>(
+  uint numTasks = ceil(encodedFileSize/(NUM_THREADS*BLOCK_SIZE*1.0));
+  single_shot_decode<<<BLOCK_NUM, NUM_THREADS, shm_needed>>>(
       d_encodedString, encodedFileSize, d_treeToken, d_treeLeft, d_treeRight,
       d_charOffset, numBlocksInEncodedString, d_decodedString, sizeOfFile,
-      d_taskCounter, numNodes);
+      d_taskCounter, numNodes, numTasks);
   cudaMemcpy(decodedString, d_decodedString, sizeof(char) * sizeOfFile,
              cudaMemcpyDeviceToHost);
   fwrite(decodedString, sizeof(char), sizeOfFile, outputFile);
