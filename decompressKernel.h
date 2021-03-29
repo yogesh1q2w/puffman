@@ -7,7 +7,7 @@
 
 __global__ void single_shot_decode(uint *encodedString, uint encodedFileSize,
                                    unsigned char *treeToken, uint *treeLeft,
-                                   uint *treeRight, volatile uint *charOffset,
+                                   uint *treeRight, volatile unsigned long long int *charOffset,
                                    uint numBlocksInEncodedString,
                                    uint *decodedString, uint sizeOfFile,
                                    uint *taskCounter, uint numNodes,

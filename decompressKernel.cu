@@ -3,20 +3,20 @@
 
 __global__ void single_shot_decode(uint *encodedString, uint encodedFileSize,
                                    unsigned char *treeToken, uint *treeLeft,
-                                   uint *treeRight, volatile uint *charOffset,
+                                   uint *treeRight, volatile unsigned long long int *charOffset,
                                    uint numBlocksInEncodedString,
                                    uint *decodedString, uint sizeOfFile,
                                    uint *taskCounter, uint numNodes,
                                    uint numTasks) {
-  uint task_idx = 0;
-  uint threadInput_idx = 0;
   uint *threadInput;
+  uint threadInput_idx = 0;
+  uint task_idx = 0;
   extern __shared__ int tree[];
   int *sh_left = tree;
   int *sh_right = (int *)&tree[numNodes];
   unsigned char *sh_token = (unsigned char *)&tree[2 * numNodes];
-  __shared__ uint shared_task_idx;
   __shared__ unsigned long long int shared_exclusive_sum;
+  __shared__ uint shared_task_idx;
 
   memcpy(sh_token, treeToken, numNodes * sizeof(unsigned char));
   memcpy(sh_left, treeLeft, numNodes * sizeof(uint));
@@ -67,7 +67,7 @@ __global__ void single_shot_decode(uint *encodedString, uint encodedFileSize,
 
     if (threadIdx.x < THREAD_DIV_WARP) {
       tmp_value = blockPrefixSum[threadIdx.x];
-      const uint shfl_mask = ~((~0) << THREAD_DIV_WARP);
+      const uint shfl_mask = ~( (~0) << THREAD_DIV_WARP );
       for (uint delta = 1; delta < THREAD_DIV_WARP; delta <<= 1) {
         uint tmp = __shfl_up_sync(shfl_mask, tmp_value, delta, THREAD_DIV_WARP);
         if (threadIdx.x >= delta)
@@ -122,7 +122,7 @@ __global__ void single_shot_decode(uint *encodedString, uint encodedFileSize,
     }
     __syncthreads();
     unsigned long long int exclusive_sum = 0;
-    int tmp_count_plus = 0;
+    uint tmp_count_plus = 0;
     if (warpLane == 0) {
       exclusive_sum = shared_exclusive_sum;
     }

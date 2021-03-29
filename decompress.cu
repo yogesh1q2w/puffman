@@ -13,7 +13,7 @@ void decode(FILE *inputFile, FILE *outputFile, HuffmanTree tree, uint blockSize,
             uint sizeOfFile, uint encodedFileSize, uint numNodes) {
   uint *encodedString, *d_encodedString;
   uint *decodedString, *d_decodedString;
-  uint *d_charOffset;
+  unsigned long long int *d_charOffset;
   uint *d_taskCounter;
   unsigned char *d_treeToken;
   uint *d_treeLeft, *d_treeRight;
@@ -30,14 +30,14 @@ void decode(FILE *inputFile, FILE *outputFile, HuffmanTree tree, uint blockSize,
              sizeof(uint) * ((encodedFileSize + 3) / 4));
   cudaMalloc((void **)&d_decodedString, sizeof(uint) * ((sizeOfFile + 3) / 4));
   cudaMalloc((void **)&d_charOffset,
-             sizeof(uint) * (numBlocksInEncodedString + 1));
+             sizeof(unsigned long long int) * (numBlocksInEncodedString + 1));
   cudaMalloc((void **)&d_taskCounter, sizeof(uint));
   cudaMalloc((void **)&d_treeToken, sizeof(unsigned char) * numNodes);
   cudaMalloc((void **)&d_treeLeft, sizeof(uint) * numNodes);
   cudaMalloc((void **)&d_treeRight, sizeof(uint) * numNodes);
 
   cudaMemset(d_taskCounter, 0, sizeof(uint));
-  cudaMemset(d_charOffset, 0, sizeof(uint) * (numBlocksInEncodedString + 1));
+  cudaMemset(d_charOffset, 0, sizeof(unsigned long long int) * (numBlocksInEncodedString + 1));
   cudaMemset(d_decodedString, 0, sizeof(uint) * ((sizeOfFile + 3) / 4));
 
   cudaMemcpy(d_encodedString, encodedString,
@@ -50,11 +50,13 @@ void decode(FILE *inputFile, FILE *outputFile, HuffmanTree tree, uint blockSize,
   cudaMemcpy(d_treeRight, tree.tree.right, numNodes * sizeof(uint),
              cudaMemcpyHostToDevice);
   uint shm_needed = numNodes * 9;
-  uint numTasks = ceil(encodedFileSize/(NUM_THREADS*BLOCK_SIZE*1.0));
+  uint numTasks = ceil(encodedFileSize / (NUM_THREADS * BLOCK_SIZE * 1.0));
+  TIMER_START(kernel)
   single_shot_decode<<<BLOCK_NUM, NUM_THREADS, shm_needed>>>(
       d_encodedString, encodedFileSize, d_treeToken, d_treeLeft, d_treeRight,
       d_charOffset, numBlocksInEncodedString, d_decodedString, sizeOfFile,
       d_taskCounter, numNodes, numTasks);
+  TIMER_STOP(kernel)
   cudaMemcpy(decodedString, d_decodedString, sizeof(char) * sizeOfFile,
              cudaMemcpyDeviceToHost);
   fwrite(decodedString, sizeof(char), sizeOfFile, outputFile);
@@ -83,11 +85,12 @@ int main(int argc, char *argv[]) {
   cout << sizeOfFile << "," << blockSize << endl;
 
   HuffmanTree tree;
+  TIMER_START(tree_generation)
   tree.readFromFile(inputFile);
+  TIMER_STOP(tree_generation)
   uint encodedFileSize;
   if (1 != fread(&encodedFileSize, sizeof(uint), 1, inputFile))
     fatal("File read error 3");
-  cout << "Encoded file size = " << encodedFileSize << endl;
   decode(inputFile, outputFile, tree, blockSize, sizeOfFile, encodedFileSize,
          2 * tree.noOfLeaves - 1);
   fclose(inputFile);
