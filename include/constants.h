@@ -14,7 +14,7 @@
 #define GET_CHAR(value, shift) ((value >> ((shift)*8)) & 0xFF)
 #define BLOCK_SIZE 4096
 #define PER_THREAD_PROC 16
-#define BLOCK_NUM 8 * 3
+#define BLOCK_NUM 8*80 
 #define NUM_THREADS 256
 
 #define HIST_THREADS 192
@@ -36,5 +36,8 @@
   symbols = (symbols | (symbol << (pos * 8)));
 
 #define THREAD_DIV_WARP NUM_THREADS / WARP_SIZE
+
+#define EXIT_FAILURE 1
 typedef unsigned long long int ull;
+typedef unsigned int uint;
 #endif
