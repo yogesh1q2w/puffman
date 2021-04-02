@@ -1,11 +1,12 @@
 #ifndef HUFFMAN
-#define HUFFMAN 1
-
-#include <fstream>
+#define HUFFMAN
+#include "constants.h"
+#include <math.h>
+#include <queue>
+#include <stdio.h>
 #include <vector>
 
-using namespace std;
-void fatal(const char* str);
+void fatal(const char *str);
 
 struct TreeNode {
   unsigned char token;
@@ -30,8 +31,7 @@ private:
   TreeNode *root;
   uint createTreeFromFile(unsigned char *array, uint &offset, uint &index);
   void deleteTree(TreeNode *node);
-  void constructTree(TreeNode *node, unsigned char *bitsRepTree,
-                     uint &pos);
+  void constructTree(TreeNode *node, unsigned char *bitsRepTree, uint &pos);
 
   void buildTreeFromFrequencies(uint *frequency);
   void getCodes(TreeNode *node, uint &code, unsigned char len,

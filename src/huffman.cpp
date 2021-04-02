@@ -1,20 +1,9 @@
-#include "constants.h"
-#include "huffman.h"
-
-#include <assert.h>
-#include <cstring>
-#include <iostream>
-#include <math.h>
-#include <queue>
-#include <stdio.h>
-#include <string.h>
-#include <utility>
-
+#include "../include/huffman.h"
 using namespace std;
 
-void fatal(const char* str){
-	fprintf( stderr, "%s! at %s in %d\n", str, __FILE__, __LINE__);
-	exit(EXIT_FAILURE);
+void fatal(const char *str) {
+  fprintf(stderr, "%s! at %s in %d\n", str, __FILE__, __LINE__);
+  exit(EXIT_FAILURE);
 }
 
 template <class T>
@@ -76,13 +65,14 @@ uint HuffmanTree::createTreeFromFile(unsigned char *huffmanTree, uint &offset,
 void HuffmanTree::readFromFile(FILE *file) {
   if (1 != fread(&noOfLeaves, sizeof(uint), 1, file))
     fatal("File read error 3");
-  cout <<"num leaves = " << noOfLeaves << endl;
   uint numNodes = 2 * noOfLeaves - 1;
   uint sizeOfHuffmanTree = 10 * noOfLeaves - 1;
   uint huffmanTreeSize = ceil(sizeOfHuffmanTree / 8.);
 
   unsigned char huffmanTree[huffmanTreeSize];
-  if(huffmanTreeSize != fread(huffmanTree, sizeof(unsigned char), huffmanTreeSize, file))fatal("File read error 4");
+  if (huffmanTreeSize !=
+      fread(huffmanTree, sizeof(unsigned char), huffmanTreeSize, file))
+    fatal("File read error 4");
 
   tree.token = new unsigned char[numNodes];
   tree.left = new int[numNodes];
@@ -91,15 +81,11 @@ void HuffmanTree::readFromFile(FILE *file) {
   uint offset = 0;
   uint index = 0;
   createTreeFromFile(huffmanTree, offset, index);
-  // for (uint i = 0; i < numNodes; i++) {
-  //   cout <<i<<") " << tree.token[i] << "," << tree.left[i] << "," << tree.right[i]
-  //        << endl;
-  // }
 }
 
 void HuffmanTree::buildTreeFromFrequencies(unsigned int *frequency) {
   typedef pair<uint, TreeNode *> pullt;
-  priority_queue<pullt, vector<pullt>, greater<pullt> > minHeap;
+  priority_queue<pullt, vector<pullt>, greater<pullt>> minHeap;
   noOfLeaves = 0;
   for (unsigned short i = 0; i < 256; i++) {
     if (frequency[i] > 0) {
@@ -118,8 +104,8 @@ void HuffmanTree::buildTreeFromFrequencies(unsigned int *frequency) {
   root = minHeap.top().second;
 }
 
-void HuffmanTree::getCodes(TreeNode *node, uint &code,
-                           unsigned char len, codedict &dictionary) {
+void HuffmanTree::getCodes(TreeNode *node, uint &code, unsigned char len,
+                           codedict &dictionary) {
   if ((node->left == nullptr) && (node->right == nullptr)) {
     dictionary.codeSize[node->token] = len;
     dictionary.code[node->token] = code;
@@ -127,12 +113,12 @@ void HuffmanTree::getCodes(TreeNode *node, uint &code,
   }
 
   if (node->left != nullptr) {
-    code = code & (~(1 << (31-len)));
+    code = code & (~(1 << (31 - len)));
     getCodes(node->left, code, len + 1, dictionary);
   }
 
   if (node->right != nullptr) {
-    code = code | (1 << (31-len));
+    code = code | (1 << (31 - len));
     getCodes(node->right, code, len + 1, dictionary);
   }
 }
