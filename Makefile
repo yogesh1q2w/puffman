@@ -40,9 +40,11 @@ $(OBJDIR)/%.o: $(SRCDIR)/%.cu $(INCLUDES)
 	$(NVCC) $(NVCCFLAGS) -c -o $@ $<
 
 $(BIN_COMP): $(COMMON_OBJS) $(COMRPESS_CU_OBJS) $(COMPRESS_OBJS)
+	@if [ ! -e `dirname $@` ]; then mkdir -p `dirname $@`;fi
 	$(NVCC) $(NVCCFLAGS) -o $@ $^
 	
 $(BIN_DECOMP): $(COMMON_OBJS) $(DECOMPRESS_CU_OBJS) $(DECOMPRESS_OBJS)
+	@if [ ! -e `dirname $@` ]; then mkdir -p `dirname $@`;fi
 	$(NVCC) $(NVCCFLAGS) -o $@ $^
 	
 
@@ -50,6 +52,7 @@ clean:
 	rm -rf $(OBJDIR)/*.o $(BIN_COMP) $(BIN_DECOMP)
 
 test:
+	mkdir -p $(TEMPDIR)
 	base64 /dev/urandom | head -c 50000000 > $(TEMPDIR)/testFile.txt
 	$(BIN_COMP) $(TEMPDIR)/testFile.txt
 	$(BIN_DECOMP) $(TEMPDIR)/compressed_output.bin
