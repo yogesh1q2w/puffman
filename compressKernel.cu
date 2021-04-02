@@ -82,14 +82,16 @@ __device__ inline unsigned char getcharAt(uint *dfileContent, uint pos) {
   return (dfileContent[pos >> 2] >> ((pos & 3U) << 3)) & 0xFFU;
 }
 
-__global__ void encode(uint fileSize, uint *dfileContent, uint *dbitOffsets,
-                       uint *d_boundary_index, uint *d_compressedFile,
-                       uint *d_dictionary_code,
+__global__ void encode(uint fileSize, uint *dfileContent,
+                       unsigned long long int *dbitOffsets,
+                       unsigned long long int *d_boundary_index,
+                       uint *d_compressedFile, uint *d_dictionary_code,
                        unsigned char *d_dictionary_codelens, uint *counter,
                        uint numTasks) {
   uint task_idx = 0;
   uint threadInput_idx = 0;
-  uint *threadInput, *threadBoundaryIndex;
+  uint *threadInput;
+  unsigned long long int *threadBoundaryIndex;
   __shared__ struct codedict sh_dictionary;
   __shared__ unsigned int shared_task_idx;
 
@@ -130,7 +132,7 @@ __global__ void encode(uint fileSize, uint *dfileContent, uint *dbitOffsets,
       unsigned char code_length =
           sh_dictionary.codeSize[GET_CHAR(input, inputPosInThreadTask & 3)];
       code >>= (32 - code_length);
-      uint boundary_pos = threadBoundaryIndex[inputPosInThreadTask];
+      unsigned long long int boundary_pos = threadBoundaryIndex[inputPosInThreadTask];
       if (boundary_pos != 0) {
         code >>=
             (code_length -

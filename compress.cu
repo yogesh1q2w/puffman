@@ -12,8 +12,6 @@ using namespace std;
 uint blockSize = BLOCK_SIZE;
 uint *fileContent, *dfileContent;
 codedict dictionary;
-uint dictionarySize;
-unsigned char useSharedMemory;
 unsigned long long int fileSize;
 uint intFileSize;
 uint frequency[256];
@@ -52,16 +50,6 @@ void getFrequencies() {
   CUERROR
 }
 
-unsigned long long int getMaxOutputFileSize() {
-  unsigned long long int maxOutputFileSize = 0;
-  for (uint i = 0; i < 256; i++) {
-    maxOutputFileSize += frequency[i] * dictionary.codeSize[i];
-  }
-  maxOutputFileSize =
-      ceil(maxOutputFileSize * (blockSize / (blockSize - 32.0)));
-  return maxOutputFileSize;
-}
-
 inline unsigned char getcharAt(uint pos) {
   return (fileContent[pos >> 2] >> ((pos & 3U) << 3)) & 0xFFU;
 }
@@ -75,11 +63,12 @@ void printOut(uint *out, uint size) {
   cout << "\n-------------------------------------------------------" << endl;
 }
 
-void getOffsetArray(uint *bitOffsets, uint *boundary_index,
-                    uint &encodedFileSize) {
+void getOffsetArray(unsigned long long int *bitOffsets,
+                    unsigned long long int *boundary_index,
+                    unsigned long long int &encodedFileSize) {
   bitOffsets[0] = 0;
-  uint searchValue = BLOCK_SIZE;
-  uint i;
+  unsigned long long int searchValue = BLOCK_SIZE;
+  unsigned long long int i;
   for (i = 1; i < fileSize; i++) {
     bitOffsets[i] = bitOffsets[i - 1] + dictionary.codeSize[getcharAt(i - 1)];
 
@@ -105,25 +94,26 @@ void getOffsetArray(uint *bitOffsets, uint *boundary_index,
 void writeFileContents(FILE *outputFile) {
 
   uint *compressedFile, *d_compressedFile;
-  uint *bitOffsets, *dbitOffsets;
-  uint *boundary_index, *d_boundary_index;
-  cudaMallocHost(&bitOffsets, fileSize * sizeof(uint));
-  cudaMallocHost(&boundary_index, fileSize * sizeof(uint));
-  cudaMemset(boundary_index, 0, fileSize * sizeof(uint));
+  unsigned long long int *bitOffsets, *dbitOffsets;
+  unsigned long long int *boundary_index, *d_boundary_index;
+  cudaMallocHost(&bitOffsets, fileSize * sizeof(unsigned long long int));
+  cudaMallocHost(&boundary_index, fileSize * sizeof(unsigned long long int));
+  cudaMemset(boundary_index, 0, fileSize * sizeof(unsigned long long int));
   CUERROR
-  cudaMalloc((void **)&dbitOffsets, fileSize * sizeof(uint));
-  cudaMalloc((void **)&d_boundary_index, fileSize * sizeof(uint));
+  cudaMalloc((void **)&dbitOffsets, fileSize * sizeof(unsigned long long int));
+  cudaMalloc((void **)&d_boundary_index,
+             fileSize * sizeof(unsigned long long int));
   CUERROR
 
-  uint encodedFileSize;
+  unsigned long long int encodedFileSize;
   TIMER_START(offset)
   getOffsetArray(bitOffsets, boundary_index, encodedFileSize);
   TIMER_STOP(offset)
 
-  cudaMemcpy(dbitOffsets, bitOffsets, fileSize * sizeof(uint),
+  cudaMemcpy(dbitOffsets, bitOffsets, fileSize * sizeof(unsigned long long int),
              cudaMemcpyHostToDevice);
-  cudaMemcpy(d_boundary_index, boundary_index, fileSize * sizeof(uint),
-             cudaMemcpyHostToDevice);
+  cudaMemcpy(d_boundary_index, boundary_index,
+             fileSize * sizeof(unsigned long long int), cudaMemcpyHostToDevice);
   CUERROR
 
   // cout << "Prefix array and Boundary" << endl;
@@ -166,7 +156,7 @@ void writeFileContents(FILE *outputFile) {
              cudaMemcpyDeviceToHost);
   CUERROR
   cout << "enc file size = " << encodedFileSize << endl;
-  fwrite(&encodedFileSize, sizeof(uint), 1, outputFile);
+  fwrite(&encodedFileSize, sizeof(unsigned long long int), 1, outputFile);
   fwrite(compressedFile, sizeof(uint), writeSize, outputFile);
   fdatasync(outputFile->_fileno);
   cudaFree(d_compressedFile);

@@ -1,15 +1,14 @@
 #include "decompressKernel.h"
-#include <cstring>
 
-__global__ void single_shot_decode(uint *encodedString, uint encodedFileSize,
+__global__ void single_shot_decode(uint *encodedString,
+                                   unsigned long long int encodedFileSize,
                                    unsigned char *treeToken, uint *treeLeft,
-                                   uint *treeRight, volatile unsigned long long int *charOffset,
-                                   uint numBlocksInEncodedString,
-                                   uint *decodedString, uint sizeOfFile,
-                                   uint *taskCounter, uint numNodes,
-                                   uint numTasks) {
+                                   uint *treeRight,
+                                   volatile unsigned long long int *charOffset,
+                                   uint *decodedString, uint *taskCounter,
+                                   uint numNodes, uint numTasks) {
   uint *threadInput;
-  uint threadInput_idx = 0;
+  unsigned long long int threadInput_idx = 0;
   uint task_idx = 0;
   extern __shared__ int tree[];
   int *sh_left = tree;
@@ -28,9 +27,10 @@ __global__ void single_shot_decode(uint *encodedString, uint encodedFileSize,
   __syncthreads();
 
   task_idx = shared_task_idx;
-  threadInput_idx = (task_idx * blockDim.x + threadIdx.x) * BLOCK_SIZE;
+  threadInput_idx = (task_idx * blockDim.x + threadIdx.x) *
+                    (unsigned long long int)BLOCK_SIZE;
 
-  while (task_idx < numTasks && threadInput_idx < encodedFileSize) {
+  while (task_idx < numTasks) {
     threadInput = encodedString + (threadInput_idx / 32);
     uint currWord = threadInput[0];
     uint currentThreadInputPos = 0;
@@ -67,7 +67,7 @@ __global__ void single_shot_decode(uint *encodedString, uint encodedFileSize,
 
     if (threadIdx.x < THREAD_DIV_WARP) {
       tmp_value = blockPrefixSum[threadIdx.x];
-      const uint shfl_mask = ~( (~0) << THREAD_DIV_WARP );
+      const uint shfl_mask = ~((~0) << THREAD_DIV_WARP);
       for (uint delta = 1; delta < THREAD_DIV_WARP; delta <<= 1) {
         uint tmp = __shfl_up_sync(shfl_mask, tmp_value, delta, THREAD_DIV_WARP);
         if (threadIdx.x >= delta)
@@ -176,6 +176,7 @@ __global__ void single_shot_decode(uint *encodedString, uint encodedFileSize,
     __syncthreads();
 
     task_idx = shared_task_idx;
-    threadInput_idx = (task_idx * blockDim.x + threadIdx.x) * BLOCK_SIZE;
+    threadInput_idx = (task_idx * blockDim.x + threadIdx.x) *
+                      (unsigned long long int)BLOCK_SIZE;
   }
 }

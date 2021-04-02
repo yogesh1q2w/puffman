@@ -48,8 +48,8 @@ node *readAndPrintTree(FILE *fptr, uint noOfLeaves) {
 
 void readContent(FILE *fptr, uint fileSize, node *root, uint blockSize) {
 
-  uint enc_size;
-  fread(&enc_size, sizeof(uint), 1, fptr);
+  unsigned long long int enc_size;
+  fread(&enc_size, sizeof(unsigned long long int), 1, fptr);
   cout << "Encoded size = " << enc_size << endl;
   unsigned int encoding[(uint)ceil(enc_size / 32.)];
   uint readSize =

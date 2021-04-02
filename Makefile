@@ -22,7 +22,7 @@ test_compress:
 	diff decompressed_out_seq testFile.txt
 
 test:
-	base64 /dev/urandom | head -c 4000000 > testFile.txt
+	base64 /dev/urandom | head -c 50000000 > testFile.txt
 	./compress testFile.txt
 	./decompress compressed_output.bin
 	diff decompressed_output testFile.txt

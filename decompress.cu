@@ -10,7 +10,7 @@
 using namespace std;
 
 void decode(FILE *inputFile, FILE *outputFile, HuffmanTree tree, uint blockSize,
-            uint sizeOfFile, uint encodedFileSize, uint numNodes) {
+            uint sizeOfFile, unsigned long long int encodedFileSize, uint numNodes) {
   uint *encodedString, *d_encodedString;
   uint *decodedString, *d_decodedString;
   unsigned long long int *d_charOffset;
@@ -19,15 +19,14 @@ void decode(FILE *inputFile, FILE *outputFile, HuffmanTree tree, uint blockSize,
   uint *d_treeLeft, *d_treeRight;
 
   uint numBlocksInEncodedString = ceil(encodedFileSize / (1. * blockSize));
-  cudaMallocHost(&encodedString, sizeof(uint) * ((encodedFileSize + 3) / 4));
+  cudaMallocHost(&encodedString, sizeof(uint) * ((encodedFileSize + 31) / 32));
   cudaMallocHost(&decodedString, sizeof(uint) * ((sizeOfFile + 3) / 4));
-  // cout << fread(encodedString, sizeof(uint), (encodedFileSize + 3) / 4, inputFile) << " and " << (encodedFileSize+3)/4 << endl;
   if (((encodedFileSize + 31) / 32) !=
       fread(encodedString, sizeof(uint), (encodedFileSize + 31) / 32, inputFile))
     fatal("File read error 4");
 
   cudaMalloc((void **)&d_encodedString,
-             sizeof(uint) * ((encodedFileSize + 3) / 4));
+             sizeof(uint) * ((encodedFileSize + 31) / 32));
   cudaMalloc((void **)&d_decodedString, sizeof(uint) * ((sizeOfFile + 3) / 4));
   cudaMalloc((void **)&d_charOffset,
              sizeof(unsigned long long int) * (numBlocksInEncodedString + 1));
@@ -41,7 +40,7 @@ void decode(FILE *inputFile, FILE *outputFile, HuffmanTree tree, uint blockSize,
   cudaMemset(d_decodedString, 0, sizeof(uint) * ((sizeOfFile + 3) / 4));
 
   cudaMemcpy(d_encodedString, encodedString,
-             sizeof(uint) * ((encodedFileSize + 3) / 4),
+             sizeof(uint) * ((encodedFileSize + 31) / 32),
              cudaMemcpyHostToDevice);
   cudaMemcpy(d_treeToken, tree.tree.token, numNodes * sizeof(unsigned char),
              cudaMemcpyHostToDevice);
@@ -54,7 +53,7 @@ void decode(FILE *inputFile, FILE *outputFile, HuffmanTree tree, uint blockSize,
   TIMER_START(kernel)
   single_shot_decode<<<BLOCK_NUM, NUM_THREADS, shm_needed>>>(
       d_encodedString, encodedFileSize, d_treeToken, d_treeLeft, d_treeRight,
-      d_charOffset, numBlocksInEncodedString, d_decodedString, sizeOfFile,
+      d_charOffset, d_decodedString,
       d_taskCounter, numNodes, numTasks);
   TIMER_STOP(kernel)
   cudaMemcpy(decodedString, d_decodedString, sizeof(char) * sizeOfFile,
@@ -88,8 +87,9 @@ int main(int argc, char *argv[]) {
   TIMER_START(tree_generation)
   tree.readFromFile(inputFile);
   TIMER_STOP(tree_generation)
-  uint encodedFileSize;
-  if (1 != fread(&encodedFileSize, sizeof(uint), 1, inputFile))
+  unsigned long long int encodedFileSize;
+  if (1 !=
+      fread(&encodedFileSize, sizeof(unsigned long long int), 1, inputFile))
     fatal("File read error 3");
   decode(inputFile, outputFile, tree, blockSize, sizeOfFile, encodedFileSize,
          2 * tree.noOfLeaves - 1);

@@ -26,7 +26,7 @@ static double sum_of_time = 0;
   printf("%s -> %f\n", #id, time##id);
 
 #define GET_CHAR(value, shift) ((value >> ((shift)*8)) & 0xFF)
-#define BLOCK_SIZE 1024
+#define BLOCK_SIZE 4096
 #define PER_THREAD_PROC 16
 #define BLOCK_NUM 8*3
 #define NUM_THREADS 256
