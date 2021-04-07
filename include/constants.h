@@ -36,5 +36,8 @@
   symbols = (symbols | (symbol << (pos * 8)));
 
 #define THREAD_DIV_WARP NUM_THREADS / WARP_SIZE
+
+#define EXIT_FAILURE 1
 typedef unsigned long long int ull;
+typedef unsigned int uint;
 #endif
