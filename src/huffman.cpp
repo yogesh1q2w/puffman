@@ -108,7 +108,7 @@ void HuffmanTree::getCodes(TreeNode *node, uint &code, unsigned char len,
                            codedict &dictionary) {
   if ((node->left == nullptr) && (node->right == nullptr)) {
     dictionary.codeSize[node->token] = len;
-    dictionary.code[node->token] = code;
+    dictionary.code[node->token] = code >> (32-len);
     return;
   }
 

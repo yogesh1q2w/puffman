@@ -13,9 +13,10 @@
 
 #define GET_CHAR(value, shift) ((value >> ((shift)*8)) & 0xFF)
 #define BLOCK_SIZE 4096
-#define PER_THREAD_PROC 16
+#define PER_THREAD_PROC 32
 #define BLOCK_NUM 8 * 3
 #define NUM_THREADS 256
+#define INT_BITS 32
 
 #define HIST_THREADS 192
 #define WARP_SIZE 32

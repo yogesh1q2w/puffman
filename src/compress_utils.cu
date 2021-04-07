@@ -1,5 +1,6 @@
 #include "../include/compress_utils.cuh"
-
+#include <vector>
+using namespace std;
 //---------------------------------HISTOGRAM-------------------------------------
 
 inline __device__ void addByte(uint *s_WarpHist, unsigned char data) {
@@ -79,91 +80,75 @@ __host__ __device__ inline unsigned char getcharAt(uint *dfileContent,
   return (dfileContent[pos >> 2] >> ((pos & 3U) << 3)) & 0xFFU;
 }
 
-__global__ void encode(uint fileSize, uint *dfileContent,
-                       unsigned long long int *dbitOffsets,
-                       unsigned long long int *d_boundary_index,
+__global__ void encode(uint fileSize, uint *dfileContent, uint *dblockCharPos,
                        uint *d_compressedFile, uint *d_dictionary_code,
                        unsigned char *d_dictionary_codelens, uint *counter,
-                       uint numTasks) {
-  uint task_idx = 0;
-  uint threadInput_idx = 0;
+                       uint numBlocks, uint numTasks) {
+  uint task_idx, block_idx;
+  uint inputfile_idx;
   uint *threadInput;
-  unsigned long long int *threadBoundaryIndex;
   __shared__ struct codedict sh_dictionary;
-  __shared__ unsigned int shared_task_idx;
+  __shared__ uint shared_task_idx;
 
   sh_dictionary.code[threadIdx.x] = d_dictionary_code[threadIdx.x];
   sh_dictionary.codeSize[threadIdx.x] = d_dictionary_codelens[threadIdx.x];
-
+  __syncthreads();
   if (threadIdx.x == 0) {
     shared_task_idx = atomicAdd(counter, 1);
   }
-  __syncthreads();
+  
 
   task_idx = shared_task_idx;
-  threadInput_idx = (task_idx * blockDim.x + threadIdx.x) * PER_THREAD_PROC;
+  block_idx = task_idx;
 
-  while (task_idx < numTasks && threadInput_idx < fileSize) {
-    threadInput = dfileContent + (threadInput_idx / 4);
-    threadBoundaryIndex = d_boundary_index + threadInput_idx;
-    uint inputPosInThreadTask = 0;
-    uint outputPos = (d_boundary_index[threadInput_idx] == 0)
-                         ? dbitOffsets[threadInput_idx] / 32
-                         : d_boundary_index[threadInput_idx] / 32;
-    uint startPosInOutputWord = (d_boundary_index[threadInput_idx] == 0)
-                                    ? dbitOffsets[threadInput_idx] % 32
-                                    : d_boundary_index[threadInput_idx] % 32;
-    uint outputWord = 0;
-    uint input = 0;
-    uint pendingBitsFromPreviousCode;
-    uint remain_code = 0;
-    while (inputPosInThreadTask < PER_THREAD_PROC &&
-           threadInput_idx + inputPosInThreadTask < fileSize) {
-      if ((inputPosInThreadTask & 3) == 0)
-        input = threadInput[inputPosInThreadTask / 4];
-      uint code = sh_dictionary.code[GET_CHAR(input, inputPosInThreadTask & 3)];
-      unsigned char code_length =
-          sh_dictionary.codeSize[GET_CHAR(input, inputPosInThreadTask & 3)];
-      code >>= (32 - code_length);
-      unsigned long long int boundary_pos =
-          threadBoundaryIndex[inputPosInThreadTask];
-      if (boundary_pos != 0) {
-        code >>=
-            (code_length -
-             (BLOCK_SIZE * ((uint)ceil(boundary_pos / (1. * BLOCK_SIZE)))) +
-             boundary_pos);
-        code_length =
-            BLOCK_SIZE * ((uint)ceil(boundary_pos / (1. * BLOCK_SIZE))) -
-            boundary_pos;
-        threadBoundaryIndex[inputPosInThreadTask] = 0;
-        inputPosInThreadTask--;
+  while (block_idx < numBlocks) {
+    inputfile_idx = dblockCharPos[block_idx];
+    threadInput = dfileContent + (inputfile_idx / 4);
+    uint input = threadInput[0];
+    uint bits_written = 0;
+    uint window = 0;
+    uint window_pos = 0;
+    while (bits_written < BLOCK_SIZE && inputfile_idx < fileSize) {
+      uint code = sh_dictionary.code[GET_CHAR(input, inputfile_idx & 3)];
+      unsigned char code_len =
+          sh_dictionary.codeSize[GET_CHAR(input, inputfile_idx & 3)];
+      inputfile_idx++;
+      if ((inputfile_idx & 3) == 0 && inputfile_idx < fileSize)
+        input = threadInput[inputfile_idx / 4];
+      while (window_pos + code_len < INT_BITS && inputfile_idx < fileSize) {
+        window <<= code_len;
+        window |= code;
+        window_pos += code_len;
+
+        if (inputfile_idx < fileSize) {
+          code = sh_dictionary.code[GET_CHAR(input, inputfile_idx & 3)];
+          code_len = sh_dictionary.codeSize[GET_CHAR(input, inputfile_idx & 3)];
+          inputfile_idx++;
+          if ((inputfile_idx & 3) == 0 && inputfile_idx < fileSize)
+            input = threadInput[inputfile_idx / 4];
+        }
       }
-      if (32 - startPosInOutputWord >= code_length) {
-        code <<= (32 - startPosInOutputWord - code_length);
-        remain_code = 0;
-        pendingBitsFromPreviousCode = 0;
-        startPosInOutputWord += code_length;
+      const int diff = window_pos + code_len - INT_BITS;
+      uint changeIndex = (block_idx * BLOCK_SIZE + bits_written) / 32;
+      window <<= (code_len - ((diff >= 0) * diff));
+      window |= (code >> ((diff >= 0) * diff));
+      window <<= (-diff) * (diff < 0);
+      d_compressedFile[changeIndex] |= window;
+      if (diff >= 0) {
+        window = code & ~(~0 << diff);
+        window_pos = diff;
       } else {
-        remain_code = code << (32 - code_length + 32 - startPosInOutputWord);
-        pendingBitsFromPreviousCode = (code_length - 32 + startPosInOutputWord);
-        code >>= pendingBitsFromPreviousCode;
+        window_pos = 0;
       }
-      outputWord |= code;
-      if (pendingBitsFromPreviousCode) {
-        atomicOr(&d_compressedFile[outputPos++], outputWord);
-        outputWord = remain_code;
-        startPosInOutputWord = pendingBitsFromPreviousCode;
-      }
-      inputPosInThreadTask++;
+      bits_written += 32;
     }
-    atomicOr(&d_compressedFile[outputPos++], outputWord);
     if (threadIdx.x == 0) {
       shared_task_idx = atomicAdd(counter, 1);
     }
     __syncthreads();
 
     task_idx = shared_task_idx;
-    threadInput_idx = (task_idx * blockDim.x + threadIdx.x) * PER_THREAD_PROC;
+    block_idx = task_idx;
   }
 }
 
@@ -207,35 +192,28 @@ void getFrequencies(uint *dfileContent, unsigned long long int &fileSize,
   CUERROR
 }
 
-void getOffsetArray(unsigned long long int *bitOffsets,
-                    unsigned long long int *boundary_index,
+void getOffsetArray(vector<unsigned int> &blockCharPos,
                     unsigned long long int &encodedFileSize,
                     unsigned long long int &fileSize, codedict &dictionary,
                     uint *fileContent) {
-  bitOffsets[0] = 0;
+  blockCharPos.push_back(0);
   unsigned long long int searchValue = BLOCK_SIZE;
   unsigned long long int i;
-  for (i = 1; i < fileSize; i++) {
-    bitOffsets[i] =
-        bitOffsets[i - 1] + dictionary.codeSize[getcharAt(fileContent, i - 1)];
+  uint offset_sum = 0;
+  for (i = 1; i <= fileSize; i++) {
+    offset_sum += dictionary.codeSize[getcharAt(fileContent, i - 1)];
 
-    if (bitOffsets[i] > searchValue) {
-      boundary_index[i - 1] = bitOffsets[i - 1];
-      bitOffsets[i - 1] = searchValue;
+    if (offset_sum > searchValue) {
+      blockCharPos.push_back(i - 1);
+      offset_sum = searchValue;
       searchValue += BLOCK_SIZE;
       i--;
-    } else if (bitOffsets[i] == searchValue) {
+    } else if (offset_sum == searchValue) {
+      blockCharPos.push_back(i);
       searchValue += BLOCK_SIZE;
     }
   }
-
-  if (bitOffsets[i - 1] + dictionary.codeSize[getcharAt(fileContent, i - 1)] >
-      searchValue) {
-    boundary_index[i - 1] = bitOffsets[i - 1];
-    bitOffsets[i - 1] = searchValue;
-  }
-  encodedFileSize = bitOffsets[fileSize - 1] +
-                    dictionary.codeSize[getcharAt(fileContent, fileSize - 1)];
+  encodedFileSize = offset_sum;
 }
 
 void writeFileContents(FILE *outputFile, unsigned long long int &fileSize,
@@ -243,37 +221,30 @@ void writeFileContents(FILE *outputFile, unsigned long long int &fileSize,
                        codedict &dictionary) {
 
   uint *compressedFile, *d_compressedFile;
-  unsigned long long int *bitOffsets, *dbitOffsets;
-  unsigned long long int *boundary_index, *d_boundary_index;
-
-  cudaMallocHost(&bitOffsets, fileSize * sizeof(unsigned long long int));
-  CUERROR
-  cudaMallocHost(&boundary_index, fileSize * sizeof(unsigned long long int));
-  CUERROR
-  cudaMemset(boundary_index, 0, fileSize * sizeof(unsigned long long int));
-  CUERROR
-  cudaMalloc((void **)&dbitOffsets, fileSize * sizeof(unsigned long long int));
-  CUERROR
-  cudaMalloc((void **)&d_boundary_index,
-             fileSize * sizeof(unsigned long long int));
-  CUERROR
+  vector<unsigned int> blockCharPos;
+  uint *dblockCharPos;
 
   unsigned long long int encodedFileSize;
   CPU_TIMER_START(offset)
-  getOffsetArray(bitOffsets, boundary_index, encodedFileSize, fileSize,
-                 dictionary, fileContent);
+  getOffsetArray(blockCharPos, encodedFileSize, fileSize, dictionary,
+                 fileContent);
   CPU_TIMER_STOP(offset)
 
-  cudaMemcpy(dbitOffsets, bitOffsets, fileSize * sizeof(unsigned long long int),
+  uint numBlocks = blockCharPos.size();
+  cudaMalloc((void **)&dblockCharPos, numBlocks * sizeof(uint));
+  cudaMemcpy(dblockCharPos, &blockCharPos[0], numBlocks * sizeof(uint),
              cudaMemcpyHostToDevice);
-  cudaMemcpy(d_boundary_index, boundary_index,
-             fileSize * sizeof(unsigned long long int), cudaMemcpyHostToDevice);
   CUERROR
+  // uint block_char_pos[numBlocks];
+  // cudaMemcpy(block_char_pos, dblockCharPos, numBlocks*sizeof(uint),
+  // cudaMemcpyDeviceToHost); for (int i = 0; i < numBlocks; i++)
+  //   printf("%d, ", block_char_pos[i]);
+  // printf("\n");
 
   uint writeSize = (encodedFileSize + 31) >> 5;
+  printf("Writesie allowed = %d\n", writeSize);
 
   cudaMallocHost(&compressedFile, writeSize * sizeof(uint));
-  CUERROR
   cudaMalloc((void **)&d_compressedFile, writeSize * sizeof(uint));
   cudaMemset(d_compressedFile, 0, writeSize * sizeof(uint));
   CUERROR
@@ -290,13 +261,12 @@ void writeFileContents(FILE *outputFile, unsigned long long int &fileSize,
   uint *counter;
   cudaMalloc(&counter, sizeof(uint));
   cudaMemset(counter, 0, sizeof(uint));
-
-  uint numTasks = ceil(fileSize / (256. * PER_THREAD_PROC));
+  uint numTasks = ceil(numBlocks / (NUM_THREADS * 1.));
 
   GPU_TIMER_START(kernel)
-  encode<<<BLOCK_NUM, 256>>>(
-      fileSize, dfileContent, dbitOffsets, d_boundary_index, d_compressedFile,
-      d_dictionary_code, d_dictionary_codelens, counter, numTasks);
+  encode<<<BLOCK_NUM, NUM_THREADS>>>(
+      fileSize, dfileContent, dblockCharPos, d_compressedFile,
+      d_dictionary_code, d_dictionary_codelens, counter, numBlocks, numTasks);
   GPU_TIMER_STOP(kernel)
   CUERROR
   cudaMemcpy(compressedFile, d_compressedFile, writeSize * sizeof(uint),
@@ -304,12 +274,9 @@ void writeFileContents(FILE *outputFile, unsigned long long int &fileSize,
   CUERROR
   fwrite(&encodedFileSize, sizeof(unsigned long long int), 1, outputFile);
   fwrite(compressedFile, sizeof(uint), writeSize, outputFile);
-  cudaFreeHost(bitOffsets);
-  cudaFreeHost(boundary_index);
   cudaFreeHost(compressedFile);
   cudaFreeHost(fileContent);
-  cudaFree(dbitOffsets);
-  cudaFree(d_boundary_index);
+  cudaFree(dblockCharPos);
   cudaFree(d_compressedFile);
   cudaFree(dfileContent);
   cudaFree(counter);

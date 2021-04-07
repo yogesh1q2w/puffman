@@ -1,4 +1,4 @@
-ARCH = 30
+ARCH = 35
 
 CUDA_INCLUDE := /usr/local/cuda/include
 CUDA_LIB := /usr/local/cuda/lib64
@@ -53,7 +53,7 @@ clean:
 
 test:
 	mkdir -p $(TEMPDIR)
-	base64 /dev/urandom | head -c 50000000 > $(TEMPDIR)/testFile.txt
+	base64 /dev/urandom | head -c 5000 > $(TEMPDIR)/testFile.txt
 	$(BIN_COMP) $(TEMPDIR)/testFile.txt
 	$(BIN_DECOMP) $(TEMPDIR)/compressed_output.bin
 	diff $(TEMPDIR)/decompressed_output $(TEMPDIR)/testFile.txt

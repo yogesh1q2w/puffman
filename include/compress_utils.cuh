@@ -3,6 +3,8 @@
 
 #include "huffman.h"
 #include "timer.h"
+#include <vector>
+using namespace std;
 
 void readFile(uint *&fileContent, uint *&dfileContent, FILE *inputFile,
               unsigned long long int &fileSize, uint &intFileSize);
@@ -10,8 +12,7 @@ void readFile(uint *&fileContent, uint *&dfileContent, FILE *inputFile,
 void getFrequencies(uint *dfileContent, unsigned long long int &fileSize,
                     uint *&frequency, uint &intFileSize);
 
-void getOffsetArray(unsigned long long int *bitOffsets,
-                    unsigned long long int *boundary_index,
+void getOffsetArray(vector<uint> &blockCharPos,
                     unsigned long long int &encodedFileSize,
                     unsigned long long int &fileSize, codedict &dictionary,
                     uint *fileContent);
