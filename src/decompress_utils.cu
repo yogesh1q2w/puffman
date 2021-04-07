@@ -17,11 +17,10 @@ __global__ void single_shot_decode(uint *encodedString,
   __shared__ unsigned long long int shared_exclusive_sum;
   __shared__ uint shared_task_idx;
 
-  memcpy(sh_token, treeToken, numNodes * sizeof(unsigned char));
-  memcpy(sh_left, treeLeft, numNodes * sizeof(uint));
-  memcpy(sh_right, treeRight, numNodes * sizeof(uint));
-
   if (threadIdx.x == 0) {
+    memcpy(sh_token, treeToken, numNodes * sizeof(unsigned char));
+    memcpy(sh_left, treeLeft, numNodes * sizeof(uint));
+    memcpy(sh_right, treeRight, numNodes * sizeof(uint));
     shared_task_idx = atomicAdd(taskCounter, 1);
   }
   __syncthreads();
