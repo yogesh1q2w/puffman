@@ -124,19 +124,23 @@ __global__ void encode(uint fileSize, uint *dfileContent,
       uint code = sh_dictionary.code[GET_CHAR(input, inputPosInThreadTask & 3)];
       unsigned char code_length =
           sh_dictionary.codeSize[GET_CHAR(input, inputPosInThreadTask & 3)];
-      code >>= (32 - code_length);
       unsigned long long int boundary_pos =
           threadBoundaryIndex[inputPosInThreadTask];
+      // startPosInOutputWord +=
+      //     ((boundary_pos != 0) *
+      //      (code_length -
+      //       (BLOCK_SIZE * ((uint)ceil(boundary_pos / (1. * BLOCK_SIZE)))) +
+      //       boundary_pos));
       if (boundary_pos != 0) {
-        code >>=
-            (code_length -
-             (BLOCK_SIZE * ((uint)ceil(boundary_pos / (1. * BLOCK_SIZE)))) +
-             boundary_pos);
-        code_length =
-            BLOCK_SIZE * ((uint)ceil(boundary_pos / (1. * BLOCK_SIZE))) -
-            boundary_pos;
-        threadBoundaryIndex[inputPosInThreadTask] = 0;
-        inputPosInThreadTask--;
+      code >>=
+          (code_length -
+           (BLOCK_SIZE * ((uint)ceil(boundary_pos / (1. * BLOCK_SIZE)))) +
+           boundary_pos);
+      code_length =
+          BLOCK_SIZE * ((uint)ceil(boundary_pos / (1. * BLOCK_SIZE))) -
+          boundary_pos;
+      threadBoundaryIndex[inputPosInThreadTask] = 0;
+      inputPosInThreadTask--;
       }
       if (32 - startPosInOutputWord >= code_length) {
         code <<= (32 - startPosInOutputWord - code_length);

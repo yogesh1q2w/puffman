@@ -26,8 +26,7 @@ double get_ms(struct timespec start, struct timespec stop);
 
 #define CPU_TIMER_STOP(id)                                                     \
   clock_gettime(CLOCK_REALTIME, &stop##id);                                    \
-  double time##id;                                                             \
-  time##id = get_ms(start##id, stop##id);                                      \
-  printf("Time (%s) : %f [ms]\n", #id, time##id);
+  double time##id = get_ms(start##id, stop##id);                                      \
+  printf("Time - cpu (%s) : %f [ms]\n", #id, get_ms(start##id, stop##id));
 
 #endif
