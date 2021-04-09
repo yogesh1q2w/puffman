@@ -1,5 +1,51 @@
 #include "../include/decompress_utils.cuh"
 
+class DynamicString {
+private:
+  unsigned char* string;
+  uint capacity, size;
+
+  __device__ void resizeAndCopy(uint newCapacity) {
+    unsigned char* tempString = new unsigned char[newCapacity];
+    // printf("Copying from %p to %p with old size %u and new size %u\n", string, tempString, capacity, newCapacity);
+    memcpy(tempString, string, size);
+    delete string;
+    string = tempString;
+    capacity = newCapacity;
+  }
+
+public:
+  __device__ DynamicString(uint initialCapacity) {
+    string = new unsigned char[initialCapacity];
+    size = 0;
+    capacity = initialCapacity;
+  }
+
+  __device__ void freeString() {
+    if(string != nullptr)
+      delete string;
+    string = nullptr;
+  }
+
+  __device__ ~DynamicString() {
+    freeString();
+  }
+
+  __device__ void appendCharacter(char character) {
+    if(size+1 > capacity) {
+      resizeAndCopy(min(2*capacity, BLOCK_SIZE));
+    }
+    string[size++] = character;
+    // printf("Appended character %c. New size is %u\n", character, size);
+  }
+
+  __device__ void copyToDestinationAndFree(unsigned char* destination) {
+    memcpy(destination, string, size);
+    freeString();
+  }
+};
+
+
 __global__ void single_shot_decode(uint *encodedString,
                                    unsigned long long int encodedFileSize,
                                    unsigned char *treeToken, uint *treeLeft,
@@ -35,11 +81,14 @@ __global__ void single_shot_decode(uint *encodedString,
     uint currentThreadInputPos = 0;
     uint posInTree = 0;
     uint codeCount = 0;
+    // printf("Before while loop\n");
+    DynamicString string(10);
     while (currentThreadInputPos < BLOCK_SIZE &&
            threadInput_idx + currentThreadInputPos < encodedFileSize) {
       char readBit = (currWord >> (31 - (currentThreadInputPos % 32))) & 1;
       posInTree = readBit ? sh_right[posInTree] : sh_left[posInTree];
       if (sh_left[posInTree] == -1 && sh_right[posInTree] == -1) {
+        string.appendCharacter(sh_token[posInTree]);
         codeCount++;
         posInTree = 0;
       }
@@ -47,6 +96,7 @@ __global__ void single_shot_decode(uint *encodedString,
       if ((currentThreadInputPos & 31) == 0)
         currWord = threadInput[currentThreadInputPos / 32];
     }
+    // printf("After while loop\n");
 
     int warpLane = threadIdx.x & (WARP_SIZE - 1);
     int warpId = threadIdx.x / WARP_SIZE;
@@ -131,44 +181,11 @@ __global__ void single_shot_decode(uint *encodedString,
     exclusive_sum = __shfl_sync(0xFFFFFFFF, exclusive_sum, 0);
     tmp_count += __shfl_sync(0xFFFFFFFF, tmp_count_plus, 0);
 
-    uint output_ptr = (exclusive_sum + tmp_count - codeCount) / 4;
-    uint output_ptr_idx = (exclusive_sum + tmp_count - codeCount) & 3;
-
-    currWord = threadInput[0];
-    currentThreadInputPos = 0;
-    posInTree = 0;
-
-    uint output_word = 0;
-    bool first_flag = 1;
-    unsigned char decsymbol;
-
-    while (currentThreadInputPos < BLOCK_SIZE &&
-           threadInput_idx + currentThreadInputPos < encodedFileSize) {
-      char readBit = (currWord >> (31 - (currentThreadInputPos % 32))) & 1;
-      posInTree = readBit ? sh_right[posInTree] : sh_left[posInTree];
-      if (sh_left[posInTree] == -1 && sh_right[posInTree] == -1) {
-        decsymbol = sh_token[posInTree];
-        UINT_OUT(output_word, decsymbol, output_ptr_idx);
-        output_ptr_idx++;
-        if ((output_ptr_idx & 3) == 0) {
-          if (first_flag) {
-            first_flag = 0;
-            atomicOr(&decodedString[output_ptr++], output_word);
-          } else {
-            decodedString[output_ptr++] = output_word;
-          }
-          output_word = 0;
-          output_ptr_idx = 0;
-        }
-        posInTree = 0;
-      }
-      currentThreadInputPos++;
-      if ((currentThreadInputPos & 31) == 0)
-        currWord = threadInput[currentThreadInputPos / 32];
-    }
-    if (output_ptr_idx != 0) {
-      atomicOr(&decodedString[output_ptr], output_word);
-    }
+    // printf("Debugging statement 1\n");
+    uint output_ptr = exclusive_sum + tmp_count - codeCount;
+    unsigned char* destPtr = ((unsigned char*) decodedString)+output_ptr;
+    // printf("The pointer is %p\n", destPtr);
+    string.copyToDestinationAndFree(destPtr);
     if (threadIdx.x == 0) {
       shared_task_idx = atomicAdd(taskCounter, 1);
     }
@@ -224,11 +241,13 @@ void decode(FILE *inputFile, FILE *outputFile, HuffmanTree tree, uint blockSize,
              cudaMemcpyHostToDevice);
   uint shm_needed = numNodes * 9;
   uint numTasks = ceil(encodedFileSize / (NUM_THREADS * BLOCK_SIZE * 1.0));
+  CUERROR
   GPU_TIMER_START(kernel)
   single_shot_decode<<<BLOCK_NUM, NUM_THREADS, shm_needed>>>(
       d_encodedString, encodedFileSize, d_treeToken, d_treeLeft, d_treeRight,
       d_charOffset, d_decodedString, d_taskCounter, numNodes, numTasks);
   GPU_TIMER_STOP(kernel)
+  CUERROR
   cudaMemcpy(decodedString, d_decodedString, sizeof(char) * sizeOfFile,
              cudaMemcpyDeviceToHost);
   fwrite(decodedString, sizeof(char), sizeOfFile, outputFile);
