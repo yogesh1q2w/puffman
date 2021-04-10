@@ -75,37 +75,29 @@ __global__ void mergeHistogram(uint *d_Histogram, uint *d_PartialHistograms) {
 }
 
 //-----------------------------------------------------------------------------------------------
-__host__ __device__ inline unsigned char getcharAt(uint *dfileContent,
-                                                   uint pos) {
+__host__ inline unsigned char getcharAt(uint *dfileContent, uint pos) {
   return (dfileContent[pos >> 2] >> ((pos & 3U) << 3)) & 0xFFU;
 }
 
 __global__ void encode(uint fileSize, uint *dfileContent, uint *dblockCharPos,
                        uint *d_compressedFile, uint *d_dictionary_code,
-                       unsigned char *d_dictionary_codelens, uint *counter,
-                       uint numBlocks, uint numTasks) {
-  uint task_idx, block_idx;
+                       unsigned char *d_dictionary_codelens, uint numBlocks) {
+  uint block_idx;
   uint inputfile_idx;
-  uint *threadInput;
   __shared__ struct codedict sh_dictionary;
-  __shared__ uint shared_task_idx;
 
   sh_dictionary.code[threadIdx.x] = d_dictionary_code[threadIdx.x];
   sh_dictionary.codeSize[threadIdx.x] = d_dictionary_codelens[threadIdx.x];
-  __syncthreads();
-  if (threadIdx.x == 0) {
-    shared_task_idx = atomicAdd(counter, 1);
-  }
-  
 
-  task_idx = shared_task_idx;
-  block_idx = task_idx;
+  __syncthreads();
+
+  block_idx = (blockIdx.x * blockDim.x + threadIdx.x);
 
   while (block_idx < numBlocks) {
     inputfile_idx = dblockCharPos[block_idx];
-    threadInput = dfileContent + (inputfile_idx / 4);
-    uint input = threadInput[0];
+    uint input = dfileContent[inputfile_idx / 4];
     uint bits_written = 0;
+    uint changeIndex = (block_idx * BLOCK_SIZE) >> 5;
     uint window = 0;
     uint window_pos = 0;
     while (bits_written < BLOCK_SIZE && inputfile_idx < fileSize) {
@@ -114,8 +106,8 @@ __global__ void encode(uint fileSize, uint *dfileContent, uint *dblockCharPos,
           sh_dictionary.codeSize[GET_CHAR(input, inputfile_idx & 3)];
       inputfile_idx++;
       if ((inputfile_idx & 3) == 0 && inputfile_idx < fileSize)
-        input = threadInput[inputfile_idx / 4];
-      while (window_pos + code_len < INT_BITS && inputfile_idx < fileSize) {
+        input = dfileContent[inputfile_idx / 4];
+      while (window_pos + code_len < INT_BITS && inputfile_idx <= fileSize) {
         window <<= code_len;
         window |= code;
         window_pos += code_len;
@@ -125,30 +117,27 @@ __global__ void encode(uint fileSize, uint *dfileContent, uint *dblockCharPos,
           code_len = sh_dictionary.codeSize[GET_CHAR(input, inputfile_idx & 3)];
           inputfile_idx++;
           if ((inputfile_idx & 3) == 0 && inputfile_idx < fileSize)
-            input = threadInput[inputfile_idx / 4];
+            input = dfileContent[inputfile_idx / 4];
         }
       }
       const int diff = window_pos + code_len - INT_BITS;
-      uint changeIndex = (block_idx * BLOCK_SIZE + bits_written) / 32;
-      window <<= (code_len - ((diff >= 0) * diff));
-      window |= (code >> ((diff >= 0) * diff));
-      window <<= (-diff) * (diff < 0);
-      d_compressedFile[changeIndex] |= window;
       if (diff >= 0) {
+        window <<= (code_len - diff);
+        window |= (code >> diff);
+        d_compressedFile[changeIndex++] |= window;
         window = code & ~(~0 << diff);
         window_pos = diff;
       } else {
+        window <<= code_len;
+        window |= code;
+        const int shift = INT_BITS - (window_pos + code_len);
+        window <<= shift;
+        d_compressedFile[changeIndex++] |= window;
         window_pos = 0;
       }
       bits_written += 32;
     }
-    if (threadIdx.x == 0) {
-      shared_task_idx = atomicAdd(counter, 1);
-    }
-    __syncthreads();
-
-    task_idx = shared_task_idx;
-    block_idx = task_idx;
+    block_idx += (BLOCK_NUM * NUM_THREADS);
   }
 }
 
@@ -235,14 +224,9 @@ void writeFileContents(FILE *outputFile, unsigned long long int &fileSize,
   cudaMemcpy(dblockCharPos, &blockCharPos[0], numBlocks * sizeof(uint),
              cudaMemcpyHostToDevice);
   CUERROR
-  // uint block_char_pos[numBlocks];
-  // cudaMemcpy(block_char_pos, dblockCharPos, numBlocks*sizeof(uint),
-  // cudaMemcpyDeviceToHost); for (int i = 0; i < numBlocks; i++)
-  //   printf("%d, ", block_char_pos[i]);
-  // printf("\n");
-
   uint writeSize = (encodedFileSize + 31) >> 5;
-  printf("Writesie allowed = %d\n", writeSize);
+
+  printf("Last offset = %d\n", blockCharPos[numBlocks-1]);
 
   cudaMallocHost(&compressedFile, writeSize * sizeof(uint));
   cudaMalloc((void **)&d_compressedFile, writeSize * sizeof(uint));
@@ -258,15 +242,10 @@ void writeFileContents(FILE *outputFile, unsigned long long int &fileSize,
   cudaMemcpy(d_dictionary_codelens, dictionary.codeSize,
              256 * sizeof(unsigned char), cudaMemcpyHostToDevice);
 
-  uint *counter;
-  cudaMalloc(&counter, sizeof(uint));
-  cudaMemset(counter, 0, sizeof(uint));
-  uint numTasks = ceil(numBlocks / (NUM_THREADS * 1.));
-
   GPU_TIMER_START(kernel)
-  encode<<<BLOCK_NUM, NUM_THREADS>>>(
-      fileSize, dfileContent, dblockCharPos, d_compressedFile,
-      d_dictionary_code, d_dictionary_codelens, counter, numBlocks, numTasks);
+  encode<<<BLOCK_NUM, NUM_THREADS>>>(fileSize, dfileContent, dblockCharPos,
+                                     d_compressedFile, d_dictionary_code,
+                                     d_dictionary_codelens, numBlocks);
   GPU_TIMER_STOP(kernel)
   CUERROR
   cudaMemcpy(compressedFile, d_compressedFile, writeSize * sizeof(uint),
@@ -279,7 +258,6 @@ void writeFileContents(FILE *outputFile, unsigned long long int &fileSize,
   cudaFree(dblockCharPos);
   cudaFree(d_compressedFile);
   cudaFree(dfileContent);
-  cudaFree(counter);
   cudaFree(d_dictionary_code);
   cudaFree(d_dictionary_codelens);
   CUERROR
