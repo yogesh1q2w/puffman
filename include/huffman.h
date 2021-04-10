@@ -30,7 +30,8 @@ struct TreeArray {
 class HuffmanTree {
 private:
   TreeNode *root;
-  uint createTreeFromFile(unsigned char *array, uint &offset, uint &index);
+  uint createTreeFromFile(unsigned char *array, uint &offset, uint &index,
+                          unsigned char &codeSize);
   void deleteTree(TreeNode *node);
   void constructTree(TreeNode *node, unsigned char *bitsRepTree, uint &pos);
 
@@ -41,6 +42,7 @@ private:
 public:
   TreeArray tree;
   uint noOfLeaves;
+  unsigned char leastSizeCode;
   HuffmanTree();
   void readFromFile(FILE *file);
   ~HuffmanTree();

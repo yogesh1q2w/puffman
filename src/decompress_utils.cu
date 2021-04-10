@@ -4,6 +4,7 @@ class DynamicString {
 private:
   unsigned char* string;
   uint capacity, size;
+  uint maxCapacity;
 
   __device__ void resizeAndCopy(uint newCapacity) {
     unsigned char* tempString = new unsigned char[newCapacity];
@@ -15,10 +16,11 @@ private:
   }
 
 public:
-  __device__ DynamicString(uint initialCapacity) {
+  __device__ DynamicString(uint initialCapacity, uint _maxCapacity) {
     string = new unsigned char[initialCapacity];
     size = 0;
     capacity = initialCapacity;
+    maxCapacity = _maxCapacity;
   }
 
   __device__ void freeString() {
@@ -33,7 +35,7 @@ public:
 
   __device__ void appendCharacter(char character) {
     if(size+1 > capacity) {
-      resizeAndCopy(min(2*capacity, BLOCK_SIZE));
+      resizeAndCopy(min(2*capacity, maxCapacity));
     }
     string[size++] = character;
     // printf("Appended character %c. New size is %u\n", character, size);
@@ -52,7 +54,7 @@ __global__ void single_shot_decode(uint *encodedString,
                                    uint *treeRight,
                                    volatile unsigned long long int *charOffset,
                                    uint *decodedString, uint *taskCounter,
-                                   uint numNodes, uint numTasks) {
+                                   uint numNodes, uint numTasks, unsigned char leastSizeCode) {
   uint *threadInput;
   unsigned long long int threadInput_idx = 0;
   uint task_idx = 0;
@@ -82,7 +84,7 @@ __global__ void single_shot_decode(uint *encodedString,
     uint posInTree = 0;
     uint codeCount = 0;
     // printf("Before while loop\n");
-    DynamicString string(10);
+    DynamicString string(BLOCK_SIZE>>3, ceil(BLOCK_SIZE/(1.*leastSizeCode)));
     while (currentThreadInputPos < BLOCK_SIZE &&
            threadInput_idx + currentThreadInputPos < encodedFileSize) {
       char readBit = (currWord >> (31 - (currentThreadInputPos % 32))) & 1;
@@ -199,7 +201,7 @@ __global__ void single_shot_decode(uint *encodedString,
 
 void decode(FILE *inputFile, FILE *outputFile, HuffmanTree tree, uint blockSize,
             uint sizeOfFile, unsigned long long int encodedFileSize,
-            uint numNodes) {
+            uint numNodes, unsigned char leastSizeCode) {
   uint *encodedString, *d_encodedString;
   uint *decodedString, *d_decodedString;
   unsigned long long int *d_charOffset;
@@ -245,7 +247,7 @@ void decode(FILE *inputFile, FILE *outputFile, HuffmanTree tree, uint blockSize,
   GPU_TIMER_START(kernel)
   single_shot_decode<<<BLOCK_NUM, NUM_THREADS, shm_needed>>>(
       d_encodedString, encodedFileSize, d_treeToken, d_treeLeft, d_treeRight,
-      d_charOffset, d_decodedString, d_taskCounter, numNodes, numTasks);
+      d_charOffset, d_decodedString, d_taskCounter, numNodes, numTasks, leastSizeCode);
   GPU_TIMER_STOP(kernel)
   CUERROR
   cudaMemcpy(decodedString, d_decodedString, sizeof(char) * sizeOfFile,

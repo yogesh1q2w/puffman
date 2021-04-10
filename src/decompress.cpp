@@ -30,7 +30,7 @@ int main(int argc, char *argv[]) {
       fread(&encodedFileSize, sizeof(unsigned long long int), 1, inputFile))
     fatal("File read error 3");
   decode(inputFile, outputFile, tree, blockSize, sizeOfFile, encodedFileSize,
-         2 * tree.noOfLeaves - 1);
+         2 * tree.noOfLeaves - 1, tree.leastSizeCode);
   fclose(inputFile);
   fclose(outputFile);
 

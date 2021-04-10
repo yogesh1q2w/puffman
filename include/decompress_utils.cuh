@@ -10,5 +10,5 @@
 
 void decode(FILE *inputFile, FILE *outputFile, HuffmanTree tree, uint blockSize,
             uint sizeOfFile, unsigned long long int encodedFileSize,
-            uint numNodes);
+            uint numNodes, unsigned char leastCodeSize);
 #endif

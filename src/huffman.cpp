@@ -22,6 +22,7 @@ TreeNode::TreeNode(unsigned char token, TreeNode *left, TreeNode *right) {
 HuffmanTree::HuffmanTree() {
   root = nullptr;
   noOfLeaves = 0;
+  leastSizeCode = 0xFF;
 }
 
 HuffmanTree::~HuffmanTree() { deleteTree(root); }
@@ -35,7 +36,7 @@ void HuffmanTree::deleteTree(TreeNode *node) {
 }
 
 uint HuffmanTree::createTreeFromFile(unsigned char *huffmanTree, uint &offset,
-                                     uint &index) {
+                                     uint &index, unsigned char &codeSize) {
   unsigned char readBit = (huffmanTree[offset / 8] >> (7 - (offset % 8))) & 1;
   offset++;
   uint index_copy = index;
@@ -51,10 +52,16 @@ uint HuffmanTree::createTreeFromFile(unsigned char *huffmanTree, uint &offset,
     tree.token[index_copy] = x;
     tree.left[index_copy] = -1;
     tree.right[index_copy] = -1;
+    leastSizeCode = min(leastSizeCode, codeSize);
+    // printf("char->%c, codesize->%d, leastsize->%d\n", x, codeSize, leastSizeCode);
     return index_copy;
   } else {
-    uint leftChildPos = createTreeFromFile(huffmanTree, offset, index);
-    uint rightChildPos = createTreeFromFile(huffmanTree, offset, index);
+    codeSize++;
+    uint leftChildPos =
+        createTreeFromFile(huffmanTree, offset, index, codeSize);
+    uint rightChildPos =
+        createTreeFromFile(huffmanTree, offset, index, codeSize);
+    codeSize--;
     tree.token[index_copy] = 0;
     tree.left[index_copy] = leftChildPos;
     tree.right[index_copy] = rightChildPos;
@@ -80,7 +87,8 @@ void HuffmanTree::readFromFile(FILE *file) {
 
   uint offset = 0;
   uint index = 0;
-  createTreeFromFile(huffmanTree, offset, index);
+  unsigned char codeSize = 0;
+  createTreeFromFile(huffmanTree, offset, index, codeSize);
 }
 
 void HuffmanTree::buildTreeFromFrequencies(unsigned int *frequency) {
@@ -108,7 +116,8 @@ void HuffmanTree::getCodes(TreeNode *node, uint &code, unsigned char len,
                            codedict &dictionary) {
   if ((node->left == nullptr) && (node->right == nullptr)) {
     dictionary.codeSize[node->token] = len;
-    dictionary.code[node->token] = code >> (32-len);
+    dictionary.code[node->token] = code >> (32 - len);
+    // printf("char %c, codesize %d\n", node->token, len);
     return;
   }
 
