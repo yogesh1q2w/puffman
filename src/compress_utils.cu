@@ -100,7 +100,7 @@ __global__ void encode(uint fileSize, uint *dfileContent, uint *dblockCharPos,
     uint changeIndex = (block_idx * BLOCK_SIZE) >> 5;
     uint window = 0;
     uint window_pos = 0;
-    while (bits_written < BLOCK_SIZE && inputfile_idx < fileSize) {
+    while (bits_written < BLOCK_SIZE && inputfile_idx <= fileSize) {
       uint code = sh_dictionary.code[GET_CHAR(input, inputfile_idx & 3)];
       unsigned char code_len =
           sh_dictionary.codeSize[GET_CHAR(input, inputfile_idx & 3)];
